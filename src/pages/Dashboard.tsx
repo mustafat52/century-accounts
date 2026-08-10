@@ -15,9 +15,14 @@ export default function Dashboard() {
     const overdueCount = invoices.filter((i) => i.status === 'overdue').length;
     const thisMonth = monthlyFigures[monthlyFigures.length - 1];
     const lastMonth = monthlyFigures[monthlyFigures.length - 2];
-    const revenueDelta = thisMonth && lastMonth
-      ? (((thisMonth.revenue - lastMonth.revenue) / lastMonth.revenue) * 100).toFixed(1)
-      : null;
+    let revenueDelta: string | null = null;
+    if (thisMonth && lastMonth) {
+      if (lastMonth.revenue === 0) {
+        revenueDelta = thisMonth.revenue > 0 ? 'new' : null;
+      } else {
+        revenueDelta = (((thisMonth.revenue - lastMonth.revenue) / lastMonth.revenue) * 100).toFixed(1);
+      }
+    }
 
     return { outstandingReceivable, outstandingPayable, overdueCount, thisMonth, revenueDelta };
   }, [invoices, customers, vendors, monthlyFigures]);
@@ -33,8 +38,16 @@ export default function Dashboard() {
           <StatCard
             label="Revenue this month"
             value={formatINR(stats.thisMonth?.revenue ?? 0)}
-            delta={stats.revenueDelta ? `${Number(stats.revenueDelta) >= 0 ? '+' : ''}${stats.revenueDelta}% vs last month` : undefined}
-            deltaDirection={stats.revenueDelta && Number(stats.revenueDelta) >= 0 ? 'up' : 'down'}
+            delta={
+              stats.revenueDelta === 'new'
+                ? 'First revenue this period'
+                : stats.revenueDelta
+                ? `${Number(stats.revenueDelta) >= 0 ? '+' : ''}${stats.revenueDelta}% vs last month`
+                : undefined
+            }
+            deltaDirection={
+              stats.revenueDelta === 'new' || (stats.revenueDelta && Number(stats.revenueDelta) >= 0) ? 'up' : 'down'
+            }
           />
           <StatCard label="Outstanding receivables" value={formatINR(stats.outstandingReceivable)} />
           <StatCard label="Outstanding payables" value={formatINR(stats.outstandingPayable)} />
