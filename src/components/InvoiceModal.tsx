@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import type { NewInvoiceItemInput } from '../context/AppContext';
 import type { InvoiceKind, ItemSlab } from '../types';
@@ -74,14 +74,17 @@ export default function InvoiceModal() {
   const [transportation, setTransportation] = useState('');
   const [items, setItems] = useState<DraftItem[]>([blankItem('simple')]);
 
+  const wasOpenRef = useRef(false);
+
   useEffect(() => {
-    if (isInvoiceModalOpen) {
+    if (isInvoiceModalOpen && !wasOpenRef.current) {
       setCustomerId(invoiceModalCustomerId ?? customers[0]?.id ?? '');
       setKind('quick');
       setDueDate('');
       setTransportation('');
       setItems([blankItem('simple')]);
     }
+    wasOpenRef.current = isInvoiceModalOpen;
   }, [isInvoiceModalOpen, invoiceModalCustomerId, customers]);
 
   if (!isInvoiceModalOpen) return null;
