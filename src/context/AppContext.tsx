@@ -444,35 +444,93 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // ---------- Invoices ----------
   const addInvoice = async (input: NewInvoiceInput): Promise<Invoice | null> => {
-    const { data, error } = await supabase.rpc('create_order_with_items', {
-      p_customer_id: input.customerId,
-      p_kind: input.kind,
-      p_due_date: input.kind === 'quick' ? input.dueDate : null,
-      p_gst_enabled: gstEnabled,
-      p_transportation: input.transportation || 0,
-      p_items: input.items.map((i) =>
-        i.type === 'glass'
-          ? {
-              type: 'glass',
-              description: i.description,
-              slab: i.slab ?? '',
-              lengthIn: i.lengthIn,
-              widthIn: i.widthIn,
-              qty: i.qty,
-              ratePerSft: i.ratePerSft,
-              polishRate: i.polishRate,
-              fixingRatePerSft: i.fixingRatePerSft,
-            }
-          : { type: 'simple', description: i.description, slab: i.slab ?? '', quantity: i.quantity, rate: i.rate }
-      ),
-    });
-    if (error || !data) return null;
-    const full = await fetchInvoiceEffective(data.id);
-    if (!full) return null;
-    setInvoices((prev) => [full, ...prev]);
-    await Promise.all([refreshCustomers(), refreshDashboardSummary()]);
-    return full;
-  };
+  // 1. Compute subtotal + line amounts client-side (same formulas as the old RPC)
+  const computed = input.items.map((i) => {
+    if (i.type === 'glass') {
+      const sft = Math.round(((i.lengthIn * i.widthIn) / 144) * i.qty * 100) / 100;
+      const workGlass = Math.round(sft * i.ratePerSft * 100) / 100;
+      const rft = Math.round(((2 * (i.lengthIn + i.widthIn)) / 12) * i.qty * 100) / 100;
+      const polishAmt = Math.round(rft * (i.polishRate || 0) * 100) / 100;
+      const fixingAmt = Math.round(sft * (i.fixingRatePerSft || 0) * 100) / 100;
+      const amount = workGlass + polishAmt + fixingAmt;
+      return { ...i, sft, workGlass, rft, polishAmt, fixingAmt, amount };
+    }
+    const amount = Math.round(i.quantity * i.rate * 100) / 100;
+    return { ...i, amount };
+  });
+
+  const subtotal = computed.reduce((sum, i) => sum + i.amount, 0);
+  if (subtotal <= 0) return null;
+
+  const gst = gstEnabled ? Math.round(subtotal * 0.18 * 100) / 100 : 0;
+  const summary = computed.slice(0, 3).map((i) => i.description).join(', ') || 'Invoice';
+
+  // 2. Insert the invoice row
+  const { data: invoiceRow, error: invoiceErr } = await supabase
+    .from('invoices')
+    .insert({
+      customer_id: input.customerId,
+      kind: input.kind,
+      description: summary,
+      amount: subtotal,
+      gst,
+      transportation: input.transportation || 0,
+      due_date: input.kind === 'quick' ? input.dueDate : null,
+      work_status: input.kind === 'job' ? 'in_progress' : null,
+    })
+    .select()
+    .single();
+
+  if (invoiceErr || !invoiceRow) return null;
+
+  // 3. Insert the line items
+  const itemRows = computed.map((i, idx) =>
+    i.type === 'glass'
+      ? {
+          invoice_id: invoiceRow.id,
+          item_type: 'glass',
+          description: i.description,
+          slab: i.slab || null,
+          sort_order: idx,
+          length_in: i.lengthIn,
+          width_in: i.widthIn,
+          glass_qty: i.qty,
+          rate_per_sft: i.ratePerSft,
+          sft: i.sft,
+          work_glass_amount: i.workGlass,
+          rft: i.rft,
+          polish_rate: i.polishRate || 0,
+          polish_amount: i.polishAmt,
+          fixing_rate_per_sft: i.fixingRatePerSft || 0,
+          fixing_amount: i.fixingAmt,
+          amount: i.amount,
+        }
+      : {
+          invoice_id: invoiceRow.id,
+          item_type: 'simple',
+          description: i.description,
+          slab: i.slab || null,
+          sort_order: idx,
+          quantity: i.quantity,
+          rate: i.rate,
+          amount: i.amount,
+        }
+  );
+
+  const { error: itemsErr } = await supabase.from('invoice_items').insert(itemRows);
+
+  if (itemsErr) {
+    // Roll back the orphan invoice if items failed to save
+    await supabase.from('invoices').delete().eq('id', invoiceRow.id);
+    return null;
+  }
+
+  const full = await fetchInvoiceEffective(invoiceRow.id);
+  if (!full) return null;
+  setInvoices((prev) => [full, ...prev]);
+  await Promise.all([refreshCustomers(), refreshDashboardSummary()]);
+  return full;
+};
 
   const markJobCompleted = async (invoiceDbId: string) => {
     const { data, error } = await supabase.rpc('mark_job_completed', { p_invoice_id: invoiceDbId });
