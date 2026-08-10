@@ -444,7 +444,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // ---------- Invoices ----------
   const addInvoice = async (input: NewInvoiceInput): Promise<Invoice | null> => {
-    const { data, error } = await supabase.rpc('create_invoice_with_items', {
+    const { data, error } = await supabase.rpc('create_order_with_items', {
       p_customer_id: input.customerId,
       p_kind: input.kind,
       p_due_date: input.kind === 'quick' ? input.dueDate : null,

@@ -212,7 +212,7 @@ create table important_links (
 --    "qty":1,"ratePerSft":760,"polishRate":45,"fixingRatePerSft":65}
 --   {"type":"simple","description":"...","slab":"","quantity":2,"rate":250}
 -- polishRate/fixingRatePerSft may be omitted or 0 if not applicable.
-create or replace function create_invoice_with_items(
+create or replace function create_order_with_items(
   p_customer_id uuid,
   p_kind invoice_kind,
   p_due_date date, -- pass null for job orders (set later on completion)
@@ -339,9 +339,8 @@ begin
 end;
 $$;
 
-revoke all on function create_invoice_with_items(uuid, invoice_kind, date, boolean, numeric, jsonb) from public;
-grant execute on function create_invoice_with_items(uuid, invoice_kind, date, boolean, numeric, jsonb) to authenticated;
-
+revoke all on function create_order_with_items(uuid, invoice_kind, date, boolean, numeric, jsonb) from public;
+grant execute on function create_order_with_items(uuid, invoice_kind, date, boolean, numeric, jsonb) to authenticated;
 -- Mark a job-order invoice's work as done. This is what starts the
 -- due → (1 month later) → overdue clock; due_date is set here, not at
 -- invoice creation time.
