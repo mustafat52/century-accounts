@@ -611,7 +611,7 @@ tbody tr:hover { background: var(--surface-2); }
   color: #1a1a1a;
   border-radius: 3px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
-  padding: 48px 52px;
+  padding: 32px 40px;
   font-family: var(--font-body);
 }
 
@@ -689,7 +689,7 @@ tbody tr:hover { background: var(--surface-2); }
 }
 
 .receipt-footer {
-  margin-top: 44px;
+  margin-top: 26px;
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
@@ -706,7 +706,7 @@ tbody tr:hover { background: var(--surface-2); }
 .receipt-signature-line {
   min-width: 170px;
   border-top: 1px solid #999;
-  margin-top: 40px;
+  margin-top: 24px;
   padding-top: 6px;
 }
 
@@ -720,7 +720,7 @@ tbody tr:hover { background: var(--surface-2); }
     width: 100%;
     box-shadow: none;
     margin: 0;
-    padding: 24px 32px;
+    padding: 18px 28px;
   }
   .no-print { display: none !important; }
   .receipt-overlay { position: static; background: none; padding: 0; overflow: visible; }

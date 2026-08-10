@@ -24,7 +24,6 @@ export default function PrintableDocument() {
 
   const glassItems = invoice ? invoice.items.filter((it) => it.itemType === 'glass') : [];
   const hardwareItems = invoice ? invoice.items.filter((it) => it.itemType === 'simple') : [];
-  // Quotations only ever have one flat line item; invoices with no items fall back to their summary too.
   const fallbackItem = !invoice
     ? [{ id: 'summary', description: doc.description, quantity: 1, rate: doc.amount, amount: doc.amount }]
     : [];
@@ -54,8 +53,8 @@ export default function PrintableDocument() {
       <div className="receipt-page">
         <div className="receipt-head">
           <div>
-            <img src={logoLight} alt="Century Glass Art" style={{ width: 190, height: 'auto', marginBottom: 8 }} />
-            <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+            <img src={logoLight} alt="Century Glass Art" style={{ width: 170, height: 'auto', marginBottom: 6 }} />
+            <div style={{ fontSize: 11, color: '#666', marginTop: 4, lineHeight: 1.4 }}>
               11-1-268, X Road, opposite Hameed Cafe, Darus Salam, Aghapura, Nampally, Hyderabad, Telangana 500001
               <br />
               centuryglassart@gmail.com
@@ -64,7 +63,7 @@ export default function PrintableDocument() {
             </div>
           </div>
           <div className="receipt-meta">
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a1a' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#1a1a1a' }}>
               {isInvoice ? (doc.gst > 0 ? 'TAX INVOICE' : 'INVOICE') : 'QUOTATION'}
             </div>
             <div style={{ marginTop: 6 }}>{doc.id}</div>
@@ -75,7 +74,7 @@ export default function PrintableDocument() {
         </div>
 
         <div className="receipt-section-label">Bill To</div>
-        <div style={{ fontSize: 14, marginBottom: 22 }}>
+        <div style={{ fontSize: 13, marginBottom: 16 }}>
           <div style={{ fontWeight: 700 }}>{cust?.name ?? 'Unknown customer'}</div>
           <div style={{ color: '#555' }}>{cust?.contact}</div>
           {cust?.address && <div style={{ color: '#555' }}>{cust.address}</div>}
@@ -85,7 +84,7 @@ export default function PrintableDocument() {
         {glassItems.length > 0 && (
           <>
             <div className="receipt-section-label">Glass Work</div>
-            <table className="receipt-table" style={{ fontSize: 12 }}>
+            <table className="receipt-table" style={{ fontSize: 11 }}>
               <thead>
                 <tr>
                   <th>Description</th>
@@ -121,7 +120,7 @@ export default function PrintableDocument() {
         {(hardwareItems.length > 0 || fallbackItem.length > 0) && (
           <>
             <div className="receipt-section-label">{glassItems.length > 0 ? 'Architectural Hardware' : 'Items'}</div>
-            <table className="receipt-table">
+            <table className="receipt-table" style={{ fontSize: 11 }}>
               <thead>
                 <tr>
                   <th>Description</th>
@@ -173,7 +172,7 @@ export default function PrintableDocument() {
           </div>
           {isInvoice && invoice && invoice.paidAmount > 0 && (
             <>
-              <div className="receipt-totals-row" style={{ marginTop: 10, borderTop: '1px dashed #ccc', paddingTop: 10 }}>
+              <div className="receipt-totals-row" style={{ marginTop: 8, borderTop: '1px dashed #ccc', paddingTop: 8 }}>
                 <span>Paid so far</span>
                 <span>{formatINR(invoice.paidAmount)}</span>
               </div>
@@ -185,19 +184,28 @@ export default function PrintableDocument() {
           )}
         </div>
 
-        <div className="receipt-section-label" style={{ marginTop: 28 }}>
+        <div className="receipt-section-label" style={{ marginTop: 20 }}>
           Bank Details
         </div>
-        <div style={{ fontSize: 12, color: '#555', marginBottom: 10 }}>
-          Century Glass Art · Kotak Mahindra Bank · A/c 7113145246 · IFSC KKBK0007452 · N.S Road Branch
+        <div style={{ fontSize: 11, color: '#555', marginBottom: 8, lineHeight: 1.5 }}>
+          <div>Company Name - Century Glass Art</div>
+          <div>Bank Name - KOTAK MAHINDRA BANK</div>
+          <div>Branch - N.S Road</div>
+          <div>Account No – 7113145246</div>
+          <div>IFSC Code - KKBK0007452</div>
         </div>
 
         <div className="receipt-section-label">Terms &amp; Conditions</div>
-        <div style={{ fontSize: 11, color: '#777', lineHeight: 1.6, marginBottom: 10 }}>
-          Delivery within 15 days of confirmation, PO, sizes, and drawings. Custom-made goods are
-          non-cancellable once production begins. Responsibility ceases once goods leave our
-          premises; no guarantee against scratches after installation. Subject to Hyderabad
-          jurisdiction. E.&amp;O.E.
+        <div style={{ fontSize: 9.5, color: '#555', lineHeight: 1.5, marginBottom: 8 }}>
+          <div>1. Delivery: 15 days from date of receipt of confirmation, PO and Final sizes along with fabrication drawings.</div>
+          <div>2. Payment Terms: 70% Advance 20% on Delivery 10% on Completion</div>
+          <div>3. These glasses are custom made for you and the order cannot be altered / cancelled after confirmation.</div>
+          <div>4. Receive the above-mentioned articles as per your order in good condition</div>
+          <div>5. Our Responsibility ceases no sooner the Goods leave our premises</div>
+          <div>6. Quotation Validity - 2 days.</div>
+          <div>7. We do not give guarantee on scratches</div>
+          <div>8. All disputes shall be subject to Hyderabad Jurisdiction only.</div>
+          <div>9. E &amp; O.E</div>
         </div>
 
         <div className="receipt-footer">
