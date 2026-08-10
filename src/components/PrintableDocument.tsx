@@ -53,7 +53,7 @@ export default function PrintableDocument() {
       <div className="receipt-page">
         <div className="receipt-head">
           <div>
-            <img src={logoLight} alt="Century Glass Art" style={{ width: 170, height: 'auto', marginBottom: 6 }} />
+            <img src={logoLight} alt="Century Glass Art" style={{ width: 130, height: 'auto', marginBottom: 4 }} />
             <div style={{ fontSize: 11, color: '#666', marginTop: 4, lineHeight: 1.4 }}>
               11-1-268, X Road, opposite Hameed Cafe, Darus Salam, Aghapura, Nampally, Hyderabad, Telangana 500001
               <br />
