@@ -2,49 +2,41 @@ import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import type { ExpenseCategory } from '../types';
 
-const CATEGORIES: ExpenseCategory[] = [
-  'Raw Material',
-  'Labor',
-  'Payslips & Wages',
-  'Transport',
-  'Rent',
-  'Utilities',
-  'Maintenance',
-];
+const VENDOR_CATEGORIES: ExpenseCategory[] = ['Raw Material', 'Maintenance', 'Transport'];
 
-export default function ExpenseModal() {
-  const { isExpenseModalOpen, closeExpenseModal, addExpense } = useApp();
+export default function VendorPurchaseModal({ vendorId, onClose }: { vendorId: string | null; onClose: () => void }) {
+  const { addVendorPurchase } = useApp();
 
-  const [category, setCategory] = useState<ExpenseCategory>('Rent');
+  const [category, setCategory] = useState<ExpenseCategory>('Raw Material');
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState('');
 
   useEffect(() => {
-    if (isExpenseModalOpen) {
-      setCategory('Rent');
+    if (vendorId) {
+      setCategory('Raw Material');
       setDescription('');
       setAmount('');
       setDate(new Date().toISOString().slice(0, 10));
     }
-  }, [isExpenseModalOpen]);
+  }, [vendorId]);
 
-  if (!isExpenseModalOpen) return null;
+  if (!vendorId) return null;
 
   const amountNum = parseFloat(amount) || 0;
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!description || amountNum <= 0 || !date) return;
-    addExpense({ category, description, amount: amountNum, date });
-    closeExpenseModal();
+    await addVendorPurchase({ vendorId, category, description, amount: amountNum, date });
+    onClose();
   };
 
   return (
-    <div className="modal-overlay is-open" onClick={closeExpenseModal}>
+    <div className="modal-overlay is-open" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <h2>Record Expense</h2>
-          <button className="modal-close" onClick={closeExpenseModal}>
+          <h2>Record Purchase</h2>
+          <button className="modal-close" onClick={onClose}>
             &times;
           </button>
         </div>
@@ -54,7 +46,7 @@ export default function ExpenseModal() {
             <div className="form-field">
               <label>Category</label>
               <select value={category} onChange={(e) => setCategory(e.target.value as ExpenseCategory)}>
-                {CATEGORIES.filter((c) => c !== 'Raw Material').map((c) => (
+                {VENDOR_CATEGORIES.map((c) => (
                   <option key={c} value={c}>
                     {c}
                   </option>
@@ -74,7 +66,7 @@ export default function ExpenseModal() {
                 type="text"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="e.g. Monthly workshop rent"
+                placeholder="e.g. Sheet glass restock — 150 units"
               />
             </div>
           </div>
@@ -88,11 +80,11 @@ export default function ExpenseModal() {
         </div>
 
         <div className="modal-foot">
-          <button className="btn btn-ghost" onClick={closeExpenseModal}>
+          <button className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
           <button className="btn btn-primary" onClick={handleSave}>
-            Save expense
+            Save purchase
           </button>
         </div>
       </div>

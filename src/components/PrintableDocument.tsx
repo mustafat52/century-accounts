@@ -196,7 +196,7 @@ export default function PrintableDocument() {
         </div>
 
         <div className="receipt-section-label">Terms &amp; Conditions</div>
-        <div style={{ fontSize: 9.5, color: '#555', lineHeight: 1.5, marginBottom: 8 }}>
+        <div style={{ fontSize: 9.5, color: '#555', lineHeight: 1.4, marginBottom: 4 }}>
           <div>1. Delivery: 15 days from date of receipt of confirmation, PO and Final sizes along with fabrication drawings.</div>
           <div>2. Payment Terms: 70% Advance 20% on Delivery 10% on Completion</div>
           <div>3. These glasses are custom made for you and the order cannot be altered / cancelled after confirmation.</div>

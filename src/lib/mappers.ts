@@ -10,6 +10,7 @@ import type {
   Worker,
   ImportantLink,
   DashboardSummary,
+  VendorPurchase,
 } from '../types';
 
 // These mirror the Supabase table/view column names (snake_case).
@@ -143,5 +144,20 @@ export function mapDashboardSummary(row: any): DashboardSummary {
     customersBilledThisMonth: Number(row.customers_billed_this_month ?? 0),
     jobsInProgress: Number(row.jobs_in_progress ?? 0),
     jobsCompletedThisMonth: Number(row.jobs_completed_this_month ?? 0),
+  };
+}
+
+
+export function mapVendorPurchase(row: any): VendorPurchase {
+  return {
+    id: row.id,
+    vendorId: row.vendor_id,
+    category: row.category,
+    description: row.description,
+    amount: Number(row.amount),
+    date: row.expense_date,
+    paidAmount: Number(row.paid_amount),
+    balance: Number(row.balance),
+    paymentStatus: row.payment_status,
   };
 }

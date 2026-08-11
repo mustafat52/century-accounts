@@ -675,25 +675,25 @@ tbody tr:hover { background: var(--surface-2); }
 .receipt-totals-row {
   display: flex;
   justify-content: space-between;
-  padding: 6px 0;
+  padding: 4px 0;
   color: #333;
 }
 
 .receipt-totals-row.grand {
   border-top: 2px solid #1a1a1a;
   font-weight: 700;
-  font-size: 16px;
-  margin-top: 6px;
-  padding-top: 10px;
+  font-size: 15px;
+  margin-top: 4px;
+  padding-top: 6px;
   color: #1a1a1a;
 }
 
 .receipt-footer {
-  margin-top: 26px;
+  margin-top: 14px;
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  font-size: 12px;
+  font-size: 11px;
   color: #777;
   gap: 20px;
 }

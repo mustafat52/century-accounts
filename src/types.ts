@@ -89,6 +89,22 @@ export interface Expense {
   date: string;
 }
 
+
+export type VendorPaymentStatus = 'unpaid' | 'partial' | 'paid';
+
+export interface VendorPurchase {
+  id: string; // expense row id
+  vendorId: string;
+  category: ExpenseCategory;
+  description: string;
+  amount: number;
+  date: string;
+  paidAmount: number;
+  balance: number;
+  paymentStatus: VendorPaymentStatus;
+}
+
+
 export interface MonthlyFigure {
   month: string;
   revenue: number;

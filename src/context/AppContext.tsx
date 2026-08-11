@@ -14,6 +14,7 @@ import type {
   Worker,
   ImportantLink,
   DashboardSummary,
+  VendorPurchase,
 } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import {
@@ -27,6 +28,7 @@ import {
   mapWorker,
   mapImportantLink,
   mapDashboardSummary,
+  mapVendorPurchase,
 } from '../lib/mappers';
 
 export type NewInvoiceItemInput =
@@ -49,10 +51,33 @@ export type NewInvoiceItemInput =
       fixingRatePerSft: number;
     };
 
+export type NewQuotationItemInput =
+  | {
+      type: 'simple';
+      description: string;
+      area: string | null;
+      slab: ItemSlab | null;
+      quantity: number;
+      rate: number;
+    }
+  | {
+      type: 'glass';
+      description: string;
+      area: string | null;
+      slab: ItemSlab | null;
+      thicknessMm: string | null;
+      lengthIn: number;
+      widthIn: number;
+      qty: number;
+      ratePerSft: number;
+      polishRate: number;
+      fixingRatePerSft: number;
+    };
+
 interface NewInvoiceInput {
   customerId: string;
   kind: InvoiceKind;
-  dueDate: string | null; // required for 'quick', ignored for 'job'
+  dueDate: string | null;
   transportation: number;
   items: NewInvoiceItemInput[];
 }
@@ -72,24 +97,28 @@ interface NewVendorInput {
 
 interface NewExpenseInput {
   category: ExpenseCategory;
-  vendorId?: string;
   description: string;
   amount: number;
   date: string;
-  markUnpaid?: boolean;
+}
+
+interface NewVendorPurchaseInput {
+  vendorId: string;
+  category: ExpenseCategory;
+  description: string;
+  amount: number;
+  date: string;
 }
 
 interface NewQuotationInput {
   customerId: string;
-  description: string;
-  amount: number;
   validUntil: string;
+  items: NewQuotationItemInput[];
 }
 
 interface EditQuotationInput {
-  description: string;
-  amount: number;
   validUntil: string;
+  items: NewQuotationItemInput[];
 }
 
 interface NewWorkerInput {
@@ -132,6 +161,10 @@ interface AppContextValue {
   expenses: Expense[];
   addExpense: (input: NewExpenseInput) => Promise<void>;
 
+  vendorPurchases: VendorPurchase[];
+  addVendorPurchase: (input: NewVendorPurchaseInput) => Promise<void>;
+  recordVendorPayment: (expenseId: string, amount: number, note?: string) => Promise<void>;
+
   monthlyFigures: MonthlyFigure[];
   dashboardSummary: DashboardSummary;
 
@@ -171,7 +204,7 @@ interface AppContextValue {
 
   isQuotationModalOpen: boolean;
   quotationModalCustomerId: string | null;
-  editingQuotationId: string | null; // dbId of the quotation being edited
+  editingQuotationId: string | null;
   openQuotationModal: (customerId?: string) => void;
   openEditQuotationModal: (quotationDbId: string) => void;
   closeQuotationModal: () => void;
@@ -218,6 +251,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [vendorPurchases, setVendorPurchases] = useState<VendorPurchase[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [monthlyFigures, setMonthlyFigures] = useState<MonthlyFigure[]>([]);
@@ -260,13 +294,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (data) setVendors(data.map(mapVendorBalance));
   }, []);
 
+  const refreshVendorPurchases = useCallback(async () => {
+    const { data } = await supabase.from('vendor_purchases_effective').select('*').order('expense_date', { ascending: false });
+    if (data) setVendorPurchases(data.map(mapVendorPurchase));
+  }, []);
+
   const refreshWorkers = useCallback(async () => {
     const { data } = await supabase.from('worker_month_summary').select('*').order('name');
     if (data) setWorkers(data.map(mapWorker));
   }, []);
 
   const refreshExpenses = useCallback(async () => {
-    const { data } = await supabase.from('expenses').select('*').order('created_at', { ascending: false });
+    const { data } = await supabase
+      .from('expenses')
+      .select('*')
+      .is('vendor_id', null)
+      .order('created_at', { ascending: false });
     if (data) setExpenses(data.map(mapExpense));
   }, []);
 
@@ -275,7 +318,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (data) setDashboardSummary(mapDashboardSummary(data));
   }, []);
 
-  // Fetches one invoice fully hydrated (computed status/balance + its items).
   const fetchInvoiceEffective = useCallback(async (dbId: string): Promise<Invoice | null> => {
     const [invRes, itemsRes] = await Promise.all([
       supabase.from('invoices_effective').select('*').eq('id', dbId).single(),
@@ -296,6 +338,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       itemsRes,
       quotationsRes,
       expensesRes,
+      vendorPurchasesRes,
       monthlyRes,
       workersRes,
       linksRes,
@@ -307,7 +350,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       supabase.from('invoices_effective').select('*').order('created_at', { ascending: false }),
       supabase.from('invoice_items').select('*').order('sort_order'),
       supabase.from('quotations').select('*').order('created_at', { ascending: false }),
-      supabase.from('expenses').select('*').order('created_at', { ascending: false }),
+      supabase.from('expenses').select('*').is('vendor_id', null).order('created_at', { ascending: false }),
+      supabase.from('vendor_purchases_effective').select('*').order('expense_date', { ascending: false }),
       supabase.from('monthly_revenue_expense').select('*'),
       supabase.from('worker_month_summary').select('*').order('name'),
       supabase.from('important_links').select('*').order('sort_order'),
@@ -330,6 +374,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     if (quotationsRes.data) setQuotations(quotationsRes.data.map(mapQuotation));
     if (expensesRes.data) setExpenses(expensesRes.data.map(mapExpense));
+    if (vendorPurchasesRes.data) setVendorPurchases(vendorPurchasesRes.data.map(mapVendorPurchase));
     if (monthlyRes.data) setMonthlyFigures(monthlyRes.data.map(mapMonthlyFigure));
     if (workersRes.data) setWorkers(workersRes.data.map(mapWorker));
     if (linksRes.data) setLinks(linksRes.data.map(mapImportantLink));
@@ -423,114 +468,147 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return newVendor;
   };
 
-  // ---------- Expenses ----------
+  // ---------- Expenses (non-vendor only) ----------
   const addExpense = async (input: NewExpenseInput) => {
     const { data, error } = await supabase
       .from('expenses')
       .insert({
         category: input.category,
-        vendor_id: input.vendorId || null,
+        vendor_id: null,
         description: input.description,
         amount: input.amount,
         expense_date: input.date,
-        is_paid: !input.markUnpaid,
+        is_paid: true,
       })
       .select()
       .single();
     if (error || !data) return;
     setExpenses((prev) => [mapExpense(data), ...prev]);
-    if (input.vendorId) await refreshVendors();
+  };
+
+  // ---------- Vendor purchases ----------
+  const addVendorPurchase = async (input: NewVendorPurchaseInput) => {
+    const { data, error } = await supabase
+      .from('expenses')
+      .insert({
+        category: input.category,
+        vendor_id: input.vendorId,
+        description: input.description,
+        amount: input.amount,
+        expense_date: input.date,
+        is_paid: false,
+      })
+      .select()
+      .single();
+    if (error || !data) return;
+    setVendorPurchases((prev) => [
+      {
+        id: data.id,
+        vendorId: input.vendorId,
+        category: input.category,
+        description: input.description,
+        amount: input.amount,
+        date: input.date,
+        paidAmount: 0,
+        balance: input.amount,
+        paymentStatus: 'unpaid',
+      },
+      ...prev,
+    ]);
+    await refreshVendors();
+  };
+
+  const recordVendorPayment = async (expenseId: string, amount: number, note?: string) => {
+    const { error } = await supabase.from('vendor_payments').insert({ expense_id: expenseId, amount, note: note || null });
+    if (error) return;
+    await Promise.all([refreshVendorPurchases(), refreshVendors()]);
   };
 
   // ---------- Invoices ----------
   const addInvoice = async (input: NewInvoiceInput): Promise<Invoice | null> => {
-  // 1. Compute subtotal + line amounts client-side (same formulas as the old RPC)
-  const computed = input.items.map((i) => {
-    if (i.type === 'glass') {
-      const sft = Math.round(((i.lengthIn * i.widthIn) / 144) * i.qty * 100) / 100;
-      const workGlass = Math.round(sft * i.ratePerSft * 100) / 100;
-      const rft = Math.round(((2 * (i.lengthIn + i.widthIn)) / 12) * i.qty * 100) / 100;
-      const polishAmt = Math.round(rft * (i.polishRate || 0) * 100) / 100;
-      const fixingAmt = Math.round(sft * (i.fixingRatePerSft || 0) * 100) / 100;
-      const amount = workGlass + polishAmt + fixingAmt;
-      return { ...i, sft, workGlass, rft, polishAmt, fixingAmt, amount };
+    const computed = input.items.map((i) => {
+      if (i.type === 'glass') {
+        const sft = Math.round(((i.lengthIn * i.widthIn) / 144) * i.qty * 100) / 100;
+        const workGlass = Math.round(sft * i.ratePerSft * 100) / 100;
+        const rft = Math.round(((2 * (i.lengthIn + i.widthIn)) / 12) * i.qty * 100) / 100;
+        const polishAmt = Math.round(rft * (i.polishRate || 0) * 100) / 100;
+        const fixingAmt = Math.round(sft * (i.fixingRatePerSft || 0) * 100) / 100;
+        const amount = workGlass + polishAmt + fixingAmt;
+        return { ...i, sft, workGlass, rft, polishAmt, fixingAmt, amount };
+      }
+      const amount = Math.round(i.quantity * i.rate * 100) / 100;
+      return { ...i, amount };
+    });
+
+    const subtotal = computed.reduce((sum, i) => sum + i.amount, 0);
+    if (subtotal <= 0) return null;
+
+    const gst = gstEnabled ? Math.round(subtotal * 0.18 * 100) / 100 : 0;
+    const summary = computed.slice(0, 3).map((i) => i.description).join(', ') || 'Invoice';
+
+    const { data: invoiceRow, error: invoiceErr } = await supabase
+      .from('invoices')
+      .insert({
+        customer_id: input.customerId,
+        kind: input.kind,
+        description: summary,
+        amount: subtotal,
+        gst,
+        transportation: input.transportation || 0,
+        due_date: input.kind === 'quick' ? input.dueDate : null,
+        work_status: input.kind === 'job' ? 'in_progress' : null,
+      })
+      .select()
+      .single();
+
+    if (invoiceErr || !invoiceRow) return null;
+
+    const itemRows = computed.map((i, idx) =>
+      i.type === 'glass'
+        ? {
+            invoice_id: invoiceRow.id,
+            item_type: 'glass',
+            description: i.description,
+            slab: i.slab || null,
+            sort_order: idx,
+            length_in: i.lengthIn,
+            width_in: i.widthIn,
+            glass_qty: i.qty,
+            rate_per_sft: i.ratePerSft,
+            sft: i.sft,
+            work_glass_amount: i.workGlass,
+            rft: i.rft,
+            polish_rate: i.polishRate || 0,
+            polish_amount: i.polishAmt,
+            fixing_rate_per_sft: i.fixingRatePerSft || 0,
+            fixing_amount: i.fixingAmt,
+            amount: i.amount,
+          }
+        : {
+            invoice_id: invoiceRow.id,
+            item_type: 'simple',
+            description: i.description,
+            slab: i.slab || null,
+            sort_order: idx,
+            quantity: i.quantity,
+            rate: i.rate,
+            amount: i.amount,
+          }
+    );
+
+    const { error: itemsErr } = await supabase.from('invoice_items').insert(itemRows);
+
+    if (itemsErr) {
+      await supabase.from('invoices').delete().eq('id', invoiceRow.id);
+      return null;
     }
-    const amount = Math.round(i.quantity * i.rate * 100) / 100;
-    return { ...i, amount };
-  });
 
-  const subtotal = computed.reduce((sum, i) => sum + i.amount, 0);
-  if (subtotal <= 0) return null;
-
-  const gst = gstEnabled ? Math.round(subtotal * 0.18 * 100) / 100 : 0;
-  const summary = computed.slice(0, 3).map((i) => i.description).join(', ') || 'Invoice';
-
-  // 2. Insert the invoice row
-  const { data: invoiceRow, error: invoiceErr } = await supabase
-    .from('invoices')
-    .insert({
-      customer_id: input.customerId,
-      kind: input.kind,
-      description: summary,
-      amount: subtotal,
-      gst,
-      transportation: input.transportation || 0,
-      due_date: input.kind === 'quick' ? input.dueDate : null,
-      work_status: input.kind === 'job' ? 'in_progress' : null,
-    })
-    .select()
-    .single();
-
-  if (invoiceErr || !invoiceRow) return null;
-
-  // 3. Insert the line items
-  const itemRows = computed.map((i, idx) =>
-    i.type === 'glass'
-      ? {
-          invoice_id: invoiceRow.id,
-          item_type: 'glass',
-          description: i.description,
-          slab: i.slab || null,
-          sort_order: idx,
-          length_in: i.lengthIn,
-          width_in: i.widthIn,
-          glass_qty: i.qty,
-          rate_per_sft: i.ratePerSft,
-          sft: i.sft,
-          work_glass_amount: i.workGlass,
-          rft: i.rft,
-          polish_rate: i.polishRate || 0,
-          polish_amount: i.polishAmt,
-          fixing_rate_per_sft: i.fixingRatePerSft || 0,
-          fixing_amount: i.fixingAmt,
-          amount: i.amount,
-        }
-      : {
-          invoice_id: invoiceRow.id,
-          item_type: 'simple',
-          description: i.description,
-          slab: i.slab || null,
-          sort_order: idx,
-          quantity: i.quantity,
-          rate: i.rate,
-          amount: i.amount,
-        }
-  );
-
-  const { error: itemsErr } = await supabase.from('invoice_items').insert(itemRows);
-
-  if (itemsErr) {
-    // Roll back the orphan invoice if items failed to save
-    await supabase.from('invoices').delete().eq('id', invoiceRow.id);
-    return null;
-  }
-
-  const full = await fetchInvoiceEffective(invoiceRow.id);
-  if (!full) return null;
-  setInvoices((prev) => [full, ...prev]);
-  await Promise.all([refreshCustomers(), refreshDashboardSummary()]);
-  return full;
-};
+    const full = await fetchInvoiceEffective(invoiceRow.id);
+    if (!full) return null;
+    setInvoices((prev) => [full, ...prev]);
+    await Promise.all([refreshCustomers(), refreshDashboardSummary()]);
+    return full;
+  };
 
   const markJobCompleted = async (invoiceDbId: string) => {
     const { data, error } = await supabase.rpc('mark_job_completed', { p_invoice_id: invoiceDbId });
@@ -567,36 +645,160 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   // ---------- Quotations ----------
+  function computeQuotationItemAmount(i: NewQuotationItemInput) {
+    if (i.type === 'glass') {
+      const sft = Math.round(((i.lengthIn * i.widthIn) / 144) * i.qty * 100) / 100;
+      const workGlass = Math.round(sft * i.ratePerSft * 100) / 100;
+      const rft = Math.round(((2 * (i.lengthIn + i.widthIn)) / 12) * i.qty * 100) / 100;
+      const polishAmt = Math.round(rft * (i.polishRate || 0) * 100) / 100;
+      const fixingAmt = Math.round(sft * (i.fixingRatePerSft || 0) * 100) / 100;
+      return { sft, workGlass, rft, polishAmt, fixingAmt, amount: workGlass + polishAmt + fixingAmt };
+    }
+    return { amount: Math.round(i.quantity * i.rate * 100) / 100 };
+  }
+
+  function buildQuotationItemRows(quotationId: string, items: NewQuotationItemInput[]) {
+    return items.map((i, idx) => {
+      const c = computeQuotationItemAmount(i);
+      if (i.type === 'glass') {
+        return {
+          quotation_id: quotationId,
+          item_type: 'glass',
+          description: i.description,
+          area: i.area || null,
+          slab: i.slab || null,
+          sort_order: idx,
+          thickness_mm: i.thicknessMm || null,
+          length_in: i.lengthIn,
+          width_in: i.widthIn,
+          glass_qty: i.qty,
+          rate_per_sft: i.ratePerSft,
+          sft: c.sft,
+          work_glass_amount: c.workGlass,
+          rft: c.rft,
+          polish_rate: i.polishRate || 0,
+          polish_amount: c.polishAmt,
+          fixing_rate_per_sft: i.fixingRatePerSft || 0,
+          fixing_amount: c.fixingAmt,
+          amount: c.amount,
+        };
+      }
+      return {
+        quotation_id: quotationId,
+        item_type: 'simple',
+        description: i.description,
+        area: i.area || null,
+        slab: i.slab || null,
+        sort_order: idx,
+        quantity: i.quantity,
+        rate: i.rate,
+        amount: c.amount,
+      };
+    });
+  }
+
   const addQuotation = async (input: NewQuotationInput): Promise<Quotation | null> => {
-    const gst = gstEnabled ? Math.round(input.amount * 0.18) : 0;
-    const { data, error } = await supabase
+    const subtotal = input.items.reduce((sum, i) => sum + computeQuotationItemAmount(i).amount, 0);
+    if (subtotal <= 0) return null;
+    const gst = gstEnabled ? Math.round(subtotal * 0.18 * 100) / 100 : 0;
+    const summary = input.items.slice(0, 3).map((i) => i.description).join(', ') || 'Quotation';
+
+    const { data: qRow, error: qErr } = await supabase
       .from('quotations')
-      .insert({ customer_id: input.customerId, description: input.description, amount: input.amount, gst, valid_until: input.validUntil })
+      .insert({ customer_id: input.customerId, description: summary, amount: subtotal, gst, valid_until: input.validUntil })
       .select()
       .single();
-    if (error || !data) return null;
-    const newQuotation = mapQuotation(data);
+    if (qErr || !qRow) return null;
+
+    const itemRows = buildQuotationItemRows(qRow.id, input.items);
+    const { error: itemsErr } = await supabase.from('quotation_items').insert(itemRows);
+    if (itemsErr) {
+      await supabase.from('quotations').delete().eq('id', qRow.id);
+      return null;
+    }
+
+    const newQuotation = mapQuotation(qRow);
     setQuotations((prev) => [newQuotation, ...prev]);
     return newQuotation;
   };
 
   const updateQuotation = async (quotationDbId: string, input: EditQuotationInput) => {
-    const gst = gstEnabled ? Math.round(input.amount * 0.18) : 0;
-    const { data, error } = await supabase
+    const subtotal = input.items.reduce((sum, i) => sum + computeQuotationItemAmount(i).amount, 0);
+    if (subtotal <= 0) return;
+    const gst = gstEnabled ? Math.round(subtotal * 0.18 * 100) / 100 : 0;
+    const summary = input.items.slice(0, 3).map((i) => i.description).join(', ') || 'Quotation';
+
+    const { data: qRow, error: qErr } = await supabase
       .from('quotations')
-      .update({ description: input.description, amount: input.amount, gst, valid_until: input.validUntil })
+      .update({ description: summary, amount: subtotal, gst, valid_until: input.validUntil })
       .eq('id', quotationDbId)
       .select()
       .single();
-    if (error || !data) return;
-    const updated = mapQuotation(data);
+    if (qErr || !qRow) return;
+
+    await supabase.from('quotation_items').delete().eq('quotation_id', quotationDbId);
+    const itemRows = buildQuotationItemRows(quotationDbId, input.items);
+    await supabase.from('quotation_items').insert(itemRows);
+
+    const updated = mapQuotation(qRow);
     setQuotations((prev) => prev.map((q) => (q.dbId === quotationDbId ? updated : q)));
   };
 
   const convertQuotationToInvoice = async (quotationDbId: string) => {
-    const { data, error } = await supabase.rpc('convert_quotation_to_invoice', { p_quotation_id: quotationDbId });
-    if (error || !data) return;
-    const full = await fetchInvoiceEffective(data.id);
+    const { data: qRow, error: qErr } = await supabase.from('quotations').select('*').eq('id', quotationDbId).eq('status', 'pending').single();
+    if (qErr || !qRow) return;
+
+    const { data: qItems, error: itemsErr } = await supabase.from('quotation_items').select('*').eq('quotation_id', quotationDbId).order('sort_order');
+    if (itemsErr) return;
+
+    const { data: invRow, error: invErr } = await supabase
+      .from('invoices')
+      .insert({ customer_id: qRow.customer_id, kind: 'job', description: qRow.description, amount: qRow.amount, gst: qRow.gst, work_status: 'in_progress' })
+      .select()
+      .single();
+    if (invErr || !invRow) return;
+
+    const invoiceItemRows = (qItems ?? []).map((it: any) =>
+      it.item_type === 'glass'
+        ? {
+            invoice_id: invRow.id,
+            item_type: 'glass',
+            description: it.description,
+            slab: it.slab,
+            sort_order: it.sort_order,
+            thickness_mm: it.thickness_mm,
+            length_in: it.length_in,
+            width_in: it.width_in,
+            glass_qty: it.glass_qty,
+            rate_per_sft: it.rate_per_sft,
+            sft: it.sft,
+            work_glass_amount: it.work_glass_amount,
+            rft: it.rft,
+            polish_rate: it.polish_rate,
+            polish_amount: it.polish_amount,
+            fixing_rate_per_sft: it.fixing_rate_per_sft,
+            fixing_amount: it.fixing_amount,
+            amount: it.amount,
+          }
+        : {
+            invoice_id: invRow.id,
+            item_type: 'simple',
+            description: it.description,
+            slab: it.slab,
+            sort_order: it.sort_order,
+            quantity: it.quantity,
+            rate: it.rate,
+            amount: it.amount,
+          }
+    );
+
+    if (invoiceItemRows.length > 0) {
+      await supabase.from('invoice_items').insert(invoiceItemRows);
+    }
+
+    await supabase.from('quotations').update({ status: 'converted', converted_invoice_id: invRow.id }).eq('id', quotationDbId);
+
+    const full = await fetchInvoiceEffective(invRow.id);
     if (full) setInvoices((prev) => [full, ...prev]);
     setQuotations((prev) => prev.map((q) => (q.dbId === quotationDbId ? { ...q, status: 'converted' } : q)));
     await Promise.all([refreshCustomers(), refreshDashboardSummary()]);
@@ -652,6 +854,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addVendor,
       expenses,
       addExpense,
+      vendorPurchases,
+      addVendorPurchase,
+      recordVendorPayment,
       monthlyFigures,
       dashboardSummary,
       invoices,
@@ -737,6 +942,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       customers,
       vendors,
       expenses,
+      vendorPurchases,
       invoices,
       quotations,
       monthlyFigures,
