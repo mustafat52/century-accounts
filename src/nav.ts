@@ -7,6 +7,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/invoicing', label: 'Invoicing' },
+  { to: '/price-list', label: 'Price List' },
   { to: '/customers', label: 'Customers' },
   { to: '/vendors', label: 'Vendors' },
   { to: '/expenses', label: 'Expenses' },

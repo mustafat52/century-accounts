@@ -1,14 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import type { NewQuotationItemInput } from '../context/AppContext';
-import type { ItemSlab } from '../types';
+import type { InvoiceSlab } from '../types';
+import { SLAB_DISCOUNT_PERCENT } from '../types';
 
 interface DraftItem {
   key: string;
   type: 'glass' | 'simple';
   description: string;
   area: string;
-  slab: ItemSlab | '';
   thicknessMm: string;
   // simple
   quantity: string;
@@ -30,7 +30,6 @@ function blankItem(type: 'glass' | 'simple' = 'simple'): DraftItem {
     type,
     description: '',
     area: '',
-    slab: '',
     thicknessMm: '',
     quantity: '1',
     rate: '',
@@ -43,9 +42,54 @@ function blankItem(type: 'glass' | 'simple' = 'simple'): DraftItem {
   };
 }
 
+// Reload an existing quotation's saved items (from fetchQuotationItems)
+// back into editable draft rows — this is what makes Edit actually start
+// from what's really saved instead of an empty form.
+function itemInputToDraft(i: NewQuotationItemInput): DraftItem {
+  draftKeyCounter += 1;
+  if (i.type === 'glass') {
+    return {
+      key: `qitem-${draftKeyCounter}`,
+      type: 'glass',
+      description: i.description,
+      area: i.area ?? '',
+      thicknessMm: i.thicknessMm ?? '',
+      quantity: '1',
+      rate: '',
+      lengthIn: String(i.lengthIn),
+      widthIn: String(i.widthIn),
+      glassQty: String(i.qty),
+      ratePerSft: String(i.ratePerSft),
+      polishRate: i.polishRate ? String(i.polishRate) : '',
+      fixingRatePerSft: i.fixingRatePerSft ? String(i.fixingRatePerSft) : '',
+    };
+  }
+  return {
+    key: `qitem-${draftKeyCounter}`,
+    type: 'simple',
+    description: i.description,
+    area: i.area ?? '',
+    thicknessMm: '',
+    quantity: String(i.quantity),
+    rate: String(i.rate),
+    lengthIn: '',
+    widthIn: '',
+    glassQty: '1',
+    ratePerSft: '',
+    polishRate: '',
+    fixingRatePerSft: '',
+  };
+}
+
+// Glass is billed in 6-inch increments — length/width round UP to the next
+// multiple of 6, never to the nearest one (46in bills as 48in). Must match
+// AppContext's quotation math exactly (same rule invoices use), or the
+// preview shown here would disagree with what actually gets saved.
+const roundUpTo6 = (n: number) => (n > 0 ? Math.ceil(n / 6) * 6 : 0);
+
 function computeGlassAmount(it: DraftItem) {
-  const len = parseFloat(it.lengthIn) || 0;
-  const wid = parseFloat(it.widthIn) || 0;
+  const len = roundUpTo6(parseFloat(it.lengthIn) || 0);
+  const wid = roundUpTo6(parseFloat(it.widthIn) || 0);
   const qty = parseFloat(it.glassQty) || 0;
   const ratePerSft = parseFloat(it.ratePerSft) || 0;
   const polishRate = parseFloat(it.polishRate) || 0;
@@ -84,12 +128,17 @@ export default function QuotationModal() {
     quotations,
     addQuotation,
     updateQuotation,
+    fetchQuotationItems,
     gstEnabled,
+    priceList,
   } = useApp();
 
   const [customerId, setCustomerId] = useState(customers[0]?.id ?? '');
   const [validUntil, setValidUntil] = useState(defaultValidUntil());
+  const [slab, setSlab] = useState<InvoiceSlab>('A');
+  const [customDiscount, setCustomDiscount] = useState('0');
   const [items, setItems] = useState<DraftItem[]>([blankItem('simple')]);
+  const [saving, setSaving] = useState(false);
   const wasOpenRef = useRef(false);
 
   const editingQuotation = editingQuotationId ? quotations.find((q) => q.dbId === editingQuotationId) : null;
@@ -99,15 +148,23 @@ export default function QuotationModal() {
       if (editingQuotation) {
         setCustomerId(editingQuotation.customerId);
         setValidUntil(editingQuotation.validUntil);
-        // Note: editingQuotation from context doesn't carry items — those load separately below.
+        setSlab(editingQuotation.slab);
+        setCustomDiscount(editingQuotation.slab === 'D' ? String(editingQuotation.discountPercent) : '0');
+        // Reload the quotation's real saved items into the form — without
+        // this, "Edit" opens with no items at all.
+        fetchQuotationItems(editingQuotation.dbId).then((loaded) => {
+          setItems(loaded.length > 0 ? loaded.map(itemInputToDraft) : [blankItem('simple')]);
+        });
       } else {
         setCustomerId(quotationModalCustomerId ?? customers[0]?.id ?? '');
         setValidUntil(defaultValidUntil());
+        setSlab('A');
+        setCustomDiscount('0');
         setItems([blankItem('simple')]);
       }
     }
     wasOpenRef.current = isQuotationModalOpen;
-  }, [isQuotationModalOpen, quotationModalCustomerId, editingQuotation, customers]);
+  }, [isQuotationModalOpen, quotationModalCustomerId, editingQuotation, customers, fetchQuotationItems]);
 
   if (!isQuotationModalOpen) return null;
 
@@ -115,13 +172,32 @@ export default function QuotationModal() {
     setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)));
   };
 
+  const updateDescription = (key: string, value: string) => {
+    // Same shortcut as InvoiceModal: typing a name that exactly matches a
+    // price-list entry auto-fills the rate fields.
+    const match = priceList.find((p) => p.description.trim().toLowerCase() === value.trim().toLowerCase());
+    if (match) {
+      updateItem(key, {
+        description: value,
+        ratePerSft: String(match.ratePerSft),
+        polishRate: String(match.polishRate),
+        fixingRatePerSft: String(match.fixingRate),
+      });
+    } else {
+      updateItem(key, { description: value });
+    }
+  };
+
   const removeItem = (key: string) => {
     setItems((prev) => (prev.length > 1 ? prev.filter((it) => it.key !== key) : prev));
   };
 
   const subtotal = items.reduce((sum, it) => sum + computeItemAmount(it), 0);
-  const gstAmount = gstEnabled ? Math.round(subtotal * 0.18) : 0;
-  const grandTotal = subtotal + gstAmount;
+  const discountPercent = slab === 'D' ? parseFloat(customDiscount) || 0 : SLAB_DISCOUNT_PERCENT[slab];
+  const discountAmount = subtotal * (discountPercent / 100);
+  const taxableValue = subtotal - discountAmount;
+  const gstAmount = gstEnabled ? Math.round(taxableValue * 0.18) : 0;
+  const grandTotal = taxableValue + gstAmount;
 
   const isItemValid = (it: DraftItem) =>
     it.description.trim() &&
@@ -135,7 +211,8 @@ export default function QuotationModal() {
   const isValid = customerId && validUntil && items.every(isItemValid);
 
   const handleSave = async () => {
-    if (!isValid) return;
+    if (!isValid || saving) return;
+    setSaving(true);
 
     const payloadItems: NewQuotationItemInput[] = items.map((it) =>
       it.type === 'glass'
@@ -143,7 +220,6 @@ export default function QuotationModal() {
             type: 'glass',
             description: it.description.trim(),
             area: it.area.trim() || null,
-            slab: it.slab || null,
             thicknessMm: it.thicknessMm.trim() || null,
             lengthIn: parseFloat(it.lengthIn) || 0,
             widthIn: parseFloat(it.widthIn) || 0,
@@ -156,17 +232,17 @@ export default function QuotationModal() {
             type: 'simple',
             description: it.description.trim(),
             area: it.area.trim() || null,
-            slab: it.slab || null,
             quantity: parseFloat(it.quantity) || 0,
             rate: parseFloat(it.rate) || 0,
           }
     );
 
     if (editingQuotationId) {
-      await updateQuotation(editingQuotationId, { validUntil, items: payloadItems });
+      await updateQuotation(editingQuotationId, { validUntil, slab, discountPercent, items: payloadItems });
     } else {
-      await addQuotation({ customerId, validUntil, items: payloadItems });
+      await addQuotation({ customerId, validUntil, slab, discountPercent, items: payloadItems });
     }
+    setSaving(false);
     closeQuotationModal();
   };
 
@@ -198,9 +274,44 @@ export default function QuotationModal() {
             </div>
           </div>
 
+          <div className="form-row">
+            <div className="form-field">
+              <label>Slab (discount)</label>
+              <select value={slab} onChange={(e) => setSlab(e.target.value as InvoiceSlab)}>
+                <option value="A">A · 10% off</option>
+                <option value="B">B · 15% off</option>
+                <option value="C">C · 20% off</option>
+                <option value="D">D · Custom %</option>
+              </select>
+            </div>
+            {slab === 'D' && (
+              <div className="form-field">
+                <label>Custom discount (%)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.5"
+                  value={customDiscount}
+                  onChange={(e) => setCustomDiscount(e.target.value)}
+                />
+              </div>
+            )}
+          </div>
+          <div className="row-sub" style={{ marginBottom: 8 }}>
+            Stays editable while this quotation is pending — adjust the slab as the price gets
+            negotiated with the customer.
+          </div>
+
           <div className="section-title" style={{ marginTop: 8 }}>
             Items
           </div>
+
+          <datalist id="price-list-options">
+            {priceList.map((p) => (
+              <option key={p.id} value={p.description} />
+            ))}
+          </datalist>
 
           {items.map((item) => {
             const isGlass = item.type === 'glass';
@@ -245,19 +356,11 @@ export default function QuotationModal() {
                     <label>Description</label>
                     <input
                       type="text"
+                      list="price-list-options"
                       value={item.description}
-                      onChange={(e) => updateItem(item.key, { description: e.target.value })}
+                      onChange={(e) => updateDescription(item.key, e.target.value)}
                       placeholder={isGlass ? 'e.g. Grey mirror + CP' : 'e.g. Silicon sealant'}
                     />
-                  </div>
-                  <div className="form-field">
-                    <label>Slab</label>
-                    <select value={item.slab} onChange={(e) => updateItem(item.key, { slab: e.target.value as ItemSlab | '' })}>
-                      <option value="">—</option>
-                      <option value="A">A · B2C</option>
-                      <option value="B">B · B2B</option>
-                      <option value="C">C · Family</option>
-                    </select>
                   </div>
 
                   {isGlass ? (
@@ -336,6 +439,7 @@ export default function QuotationModal() {
 
           <div className="row-sub" style={{ marginTop: 6, textAlign: 'right' }}>
             Subtotal: ₹{subtotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+            {discountPercent > 0 && <> · Slab {slab} discount ({discountPercent}%): −₹{discountAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</>}
             {gstEnabled && <> · CGST+SGST (18%): ₹{gstAmount.toLocaleString('en-IN')}</>}
             {' · '}
             <strong style={{ color: 'var(--text)' }}>Total: ₹{grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>
@@ -346,8 +450,8 @@ export default function QuotationModal() {
           <button className="btn btn-ghost" onClick={closeQuotationModal}>
             Cancel
           </button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={!isValid}>
-            {editingQuotationId ? 'Save changes' : 'Save quotation'}
+          <button className="btn btn-primary" onClick={handleSave} disabled={!isValid || saving}>
+            {saving ? 'Saving…' : editingQuotationId ? 'Save changes' : 'Save quotation'}
           </button>
         </div>
       </div>

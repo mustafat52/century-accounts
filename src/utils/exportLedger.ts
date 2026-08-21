@@ -30,7 +30,7 @@ function customerLedgerRows(customer: Customer, invoices: Invoice[]) {
         Item: inv.description,
         Details: '',
         'Item Amount': inv.amount,
-        'Invoice Total': inv.amount + inv.gst + inv.transportation,
+        'Invoice Total': inv.amount - inv.discountAmount + inv.gst + inv.transportation,
         'Invoice Status': inv.status,
       });
       return;
@@ -45,7 +45,7 @@ function customerLedgerRows(customer: Customer, invoices: Invoice[]) {
         'Item Amount': item.amount,
         // Only show invoice-level totals on the first row of that invoice,
         // to avoid implying each item carries the full invoice total.
-        'Invoice Total': idx === 0 ? inv.amount + inv.gst + inv.transportation : '',
+        'Invoice Total': idx === 0 ? inv.amount - inv.discountAmount + inv.gst + inv.transportation : '',
         'Invoice Status': idx === 0 ? inv.status : '',
       });
     });

@@ -1,22 +1,87 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Topbar from '../components/Topbar';
 import VendorModal from '../components/VendorModal';
 import VendorPurchaseModal from '../components/VendorPurchaseModal';
 import VendorPaymentModal from '../components/VendorPaymentModal';
+import VendorSlipModal from '../components/VendorSlipModal';
+import PriceSlipModal from '../components/PriceSlipModal';
 import { useApp } from '../context/AppContext';
 import { formatINR } from '../utils/format';
-import type { VendorPurchase } from '../types';
+import type { VendorPurchase, VendorSlip } from '../types';
+
+// A unified purchase-history row — either a priced purchase (quick entry OR
+// a slip that's already been priced, in which case its DC No/Care Of are
+// pulled back in for display) or a slip still waiting to be priced.
+interface HistoryRow {
+  key: string;
+  date: string;
+  dcNo: string | null;
+  careOf: string | null;
+  description: string;
+  category: string | null;
+  purchase: VendorPurchase | null;
+  pendingSlip: VendorSlip | null;
+}
 
 export default function Vendors() {
-  const { vendors, vendorPurchases, openVendorModal } = useApp();
+  const { vendors, vendorPurchases, vendorSlips, openVendorModal, openPrint } = useApp();
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
   const [purchaseModalVendorId, setPurchaseModalVendorId] = useState<string | null>(null);
-  const [paymentModalPurchase, setPaymentModalPurchase] = useState<VendorPurchase | null>(null);
+  const [slipModalVendorId, setSlipModalVendorId] = useState<string | null>(null);
+  const [paymentVendorId, setPaymentVendorId] = useState<string | null>(null);
+  const [pricingSlip, setPricingSlip] = useState<VendorSlip | null>(null);
 
   const selectedVendor = vendors.find((v) => v.id === selectedVendorId);
-  const history = selectedVendorId
-    ? vendorPurchases.filter((p) => p.vendorId === selectedVendorId).sort((a, b) => (a.date < b.date ? 1 : -1))
-    : [];
+  const paymentVendor = vendors.find((v) => v.id === paymentVendorId) ?? null;
+
+  // Priced slips already show up in vendorPurchases (via their linked
+  // expense row) — this just lets us reattach the DC No / Care Of to that
+  // row for display, without touching how payable/payments work.
+  const slipByExpenseId = useMemo(() => {
+    const map = new Map<string, VendorSlip>();
+    vendorSlips.forEach((s) => {
+      if (s.expenseId) map.set(s.expenseId, s);
+    });
+    return map;
+  }, [vendorSlips]);
+
+  const history = useMemo<HistoryRow[]>(() => {
+    if (!selectedVendorId) return [];
+
+    const purchaseRows: HistoryRow[] = vendorPurchases
+      .filter((p) => p.vendorId === selectedVendorId)
+      .map((p) => {
+        const slip = slipByExpenseId.get(p.id);
+        return {
+          key: `purchase-${p.id}`,
+          date: p.date,
+          dcNo: slip?.dcNo ?? null,
+          careOf: slip?.careOf ?? null,
+          description: p.description,
+          category: p.category,
+          purchase: p,
+          pendingSlip: null,
+        };
+      });
+
+    const pendingSlipRows: HistoryRow[] = vendorSlips
+      .filter((s) => s.vendorId === selectedVendorId && s.status === 'pending_pricing')
+      .map((s) => ({
+        key: `slip-${s.id}`,
+        date: s.slipDate,
+        dcNo: s.dcNo,
+        careOf: s.careOf,
+        description: `${s.items.length} item${s.items.length !== 1 ? 's' : ''} — ${s.items
+          .slice(0, 2)
+          .map((it) => it.description)
+          .join(', ')}${s.items.length > 2 ? '…' : ''}`,
+        category: 'Raw Material',
+        purchase: null,
+        pendingSlip: s,
+      }));
+
+    return [...purchaseRows, ...pendingSlipRows].sort((a, b) => (a.date < b.date ? 1 : -1));
+  }, [selectedVendorId, vendorPurchases, vendorSlips, slipByExpenseId]);
 
   if (selectedVendor) {
     return (
@@ -38,20 +103,35 @@ export default function Vendors() {
             <div className="facet-card">
               <div className="stat-label">Payable</div>
               <div className="stat-value">{selectedVendor.payable > 0 ? formatINR(selectedVendor.payable) : 'Settled'}</div>
+              {selectedVendor.payable > 0 && (
+                <button
+                  className="btn btn-primary btn-small desktop-only"
+                  style={{ marginTop: 10 }}
+                  onClick={() => setPaymentVendorId(selectedVendor.id)}
+                >
+                  Record Payment
+                </button>
+              )}
             </div>
           </div>
 
           <div className="panel">
             <div className="panel-head">
               <h3>Purchase history</h3>
-              <button className="btn btn-primary btn-small desktop-only" onClick={() => setPurchaseModalVendorId(selectedVendor.id)}>
-                + Record Purchase
-              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-ghost btn-small desktop-only" onClick={() => setPurchaseModalVendorId(selectedVendor.id)}>
+                  + Record Purchase
+                </button>
+                <button className="btn btn-primary btn-small desktop-only" onClick={() => setSlipModalVendorId(selectedVendor.id)}>
+                  + New Slip
+                </button>
+              </div>
             </div>
             <table>
               <thead>
                 <tr>
                   <th>Date</th>
+                  <th>DC No.</th>
                   <th>Description</th>
                   <th>Category</th>
                   <th>Amount</th>
@@ -60,27 +140,72 @@ export default function Vendors() {
                 </tr>
               </thead>
               <tbody>
-                {history.map((p) => (
-                  <tr key={p.id}>
-                    <td className="row-sub">{p.date}</td>
-                    <td>{p.description}</td>
-                    <td className="row-sub">{p.category}</td>
+                {history.map((row) => (
+                  <tr key={row.key}>
+                    <td className="row-sub">{row.date}</td>
+                    <td>
+                      {row.dcNo ? (
+                        <>
+                          <div className="row-name">{row.dcNo}</div>
+                          {row.careOf && <div className="row-sub">C/O {row.careOf}</div>}
+                        </>
+                      ) : (
+                        <span className="row-sub">—</span>
+                      )}
+                    </td>
+                    <td>{row.description}</td>
+                    <td className="row-sub">{row.category}</td>
                     <td className="num">
-                      {formatINR(p.amount)}
-                      {p.paidAmount > 0 && p.paymentStatus !== 'paid' && (
-                        <div className="row-sub">Paid {formatINR(p.paidAmount)} · Bal {formatINR(p.balance)}</div>
+                      {row.purchase ? (
+                        <>
+                          {formatINR(row.purchase.amount)}
+                          {row.purchase.paidAmount > 0 && row.purchase.paymentStatus !== 'paid' && (
+                            <div className="row-sub">
+                              Paid {formatINR(row.purchase.paidAmount)} · Bal {formatINR(row.purchase.balance)}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span className="row-sub">Awaiting prices</span>
                       )}
                     </td>
                     <td>
-                      <span className={`badge ${p.paymentStatus === 'paid' ? 'paid' : p.paymentStatus === 'partial' ? 'partial' : 'due'}`}>
-                        {p.paymentStatus === 'paid' ? 'Paid' : p.paymentStatus === 'partial' ? 'Partial' : 'Unpaid'}
-                      </span>
+                      {row.purchase ? (
+                        <span
+                          className={`badge ${
+                            row.purchase.paymentStatus === 'paid'
+                              ? 'paid'
+                              : row.purchase.paymentStatus === 'partial'
+                              ? 'partial'
+                              : 'due'
+                          }`}
+                        >
+                          {row.purchase.paymentStatus === 'paid'
+                            ? 'Paid'
+                            : row.purchase.paymentStatus === 'partial'
+                            ? 'Partial'
+                            : 'Unpaid'}
+                        </span>
+                      ) : (
+                        <span className="badge due">Pending Pricing</span>
+                      )}
                     </td>
-                    <td>
-                      {p.paymentStatus !== 'paid' && (
-                        <button className="btn btn-ghost btn-small desktop-only" onClick={() => setPaymentModalPurchase(p)}>
-                          Record Payment
-                        </button>
+                    <td style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {row.pendingSlip && (
+                        <>
+                          <button
+                            className="btn btn-ghost btn-small"
+                            onClick={() => openPrint('slip', row.pendingSlip!.id)}
+                          >
+                            Print
+                          </button>
+                          <button
+                            className="btn btn-primary btn-small desktop-only"
+                            onClick={() => setPricingSlip(row.pendingSlip)}
+                          >
+                            Enter Prices
+                          </button>
+                        </>
                       )}
                     </td>
                   </tr>
@@ -96,7 +221,9 @@ export default function Vendors() {
         </div>
 
         <VendorPurchaseModal vendorId={purchaseModalVendorId} onClose={() => setPurchaseModalVendorId(null)} />
-        <VendorPaymentModal purchase={paymentModalPurchase} onClose={() => setPaymentModalPurchase(null)} />
+        <VendorSlipModal vendorId={slipModalVendorId} onClose={() => setSlipModalVendorId(null)} />
+        <VendorPaymentModal vendor={paymentVendor} onClose={() => setPaymentVendorId(null)} />
+        <PriceSlipModal slip={pricingSlip} onClose={() => setPricingSlip(null)} />
       </>
     );
   }
@@ -141,7 +268,6 @@ export default function Vendors() {
       </div>
       <VendorModal />
       <VendorPurchaseModal vendorId={purchaseModalVendorId} onClose={() => setPurchaseModalVendorId(null)} />
-      <VendorPaymentModal purchase={paymentModalPurchase} onClose={() => setPaymentModalPurchase(null)} />
     </>
   );
 }

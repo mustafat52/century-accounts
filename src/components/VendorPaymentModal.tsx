@@ -1,29 +1,32 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatINR } from '../utils/format';
-import type { VendorPurchase } from '../types';
+import type { Vendor } from '../types';
 
-export default function VendorPaymentModal({ purchase, onClose }: { purchase: VendorPurchase | null; onClose: () => void }) {
+export default function VendorPaymentModal({ vendor, onClose }: { vendor: Vendor | null; onClose: () => void }) {
   const { recordVendorPayment } = useApp();
 
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (purchase) {
+    if (vendor) {
       setAmount('');
       setNote('');
     }
-  }, [purchase]);
+  }, [vendor]);
 
-  if (!purchase) return null;
+  if (!vendor) return null;
 
   const amountNum = parseFloat(amount) || 0;
-  const overpaying = amountNum > purchase.balance;
+  const overpaying = amountNum > vendor.payable;
 
   const handleSave = async () => {
-    if (amountNum <= 0 || overpaying) return;
-    await recordVendorPayment(purchase.id, amountNum, note || undefined);
+    if (amountNum <= 0 || overpaying || saving) return;
+    setSaving(true);
+    await recordVendorPayment(vendor.id, amountNum, note || undefined);
+    setSaving(false);
     onClose();
   };
 
@@ -38,9 +41,13 @@ export default function VendorPaymentModal({ purchase, onClose }: { purchase: Ve
         </div>
 
         <div className="modal-body">
-          <div className="row-sub">{purchase.description}</div>
+          <div className="row-sub">{vendor.name}</div>
           <div className="row-sub" style={{ marginBottom: 8 }}>
-            Balance due: <strong style={{ color: 'var(--text)' }}>{formatINR(purchase.balance)}</strong>
+            Total payable: <strong style={{ color: 'var(--text)' }}>{formatINR(vendor.payable)}</strong>
+          </div>
+          <div className="row-sub" style={{ marginBottom: 8 }}>
+            This is applied across their outstanding bills automatically, oldest first — no need to
+            pick which one.
           </div>
 
           <div className="form-row">
@@ -51,7 +58,7 @@ export default function VendorPaymentModal({ purchase, onClose }: { purchase: Ve
           </div>
           {overpaying && (
             <div className="row-sub" style={{ color: 'var(--danger)' }}>
-              Amount can't exceed the balance due ({formatINR(purchase.balance)}).
+              Amount can't exceed the total payable ({formatINR(vendor.payable)}).
             </div>
           )}
 
@@ -67,8 +74,8 @@ export default function VendorPaymentModal({ purchase, onClose }: { purchase: Ve
           <button className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={amountNum <= 0 || overpaying}>
-            Save payment
+          <button className="btn btn-primary" onClick={handleSave} disabled={amountNum <= 0 || overpaying || saving}>
+            {saving ? 'Saving…' : 'Save payment'}
           </button>
         </div>
       </div>

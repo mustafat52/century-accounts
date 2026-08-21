@@ -4,10 +4,12 @@ import Sidebar from './components/Sidebar';
 import MobileNav from './components/MobileNav';
 import InvoiceModal from './components/InvoiceModal';
 import QuotationModal from './components/QuotationModal';
+import ConvertQuotationModal from './components/ConvertQuotationModal';
 import PrintableDocument from './components/PrintableDocument';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Invoicing from './pages/Invoicing';
+import PriceList from './pages/PriceList';
 import Customers from './pages/Customers';
 import Vendors from './pages/Vendors';
 import Expenses from './pages/Expenses';
@@ -40,6 +42,7 @@ function ProtectedShell() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/invoicing" element={<Invoicing />} />
+            <Route path="/price-list" element={<PriceList />} />
             <Route path="/customers" element={<Customers />} />
             <Route path="/vendors" element={<Vendors />} />
             <Route path="/expenses" element={<Expenses />} />
@@ -50,6 +53,7 @@ function ProtectedShell() {
       </main>
       <InvoiceModal />
       <QuotationModal />
+      <ConvertQuotationModal />
       <PrintableDocument />
     </div>
   );

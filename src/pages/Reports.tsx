@@ -3,6 +3,8 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import Topbar from '../components/Topbar';
 import { useApp } from '../context/AppContext';
 import { formatINR } from '../utils/format';
+import type { InvoiceSlab } from '../types';
+import { SLAB_DISCOUNT_PERCENT } from '../types';
 
 type PeriodKey = 'month' | '3m' | '6m' | 'year';
 
@@ -13,8 +15,6 @@ const PERIODS: Array<{ key: PeriodKey; label: string; monthsBack: number; chartS
   { key: 'year', label: 'This Year', monthsBack: 12, chartSlice: 6 },
 ];
 
-// Anchor "today" to the most recent date actually present in the data, so the
-// demo behaves sensibly no matter when it's opened.
 function latestDate(dates: string[]): string {
   return dates.length ? dates.reduce((a, b) => (a > b ? a : b)) : new Date().toISOString().slice(0, 10);
 }
@@ -64,14 +64,14 @@ export default function Reports() {
     };
     periodInvoices.forEach((i) => {
       buckets[i.status].count += 1;
-      buckets[i.status].amount += i.amount + i.gst + i.transportation;
+      buckets[i.status].amount += i.amount - i.discountAmount + i.gst + i.transportation;
     });
     return buckets;
   }, [periodInvoices]);
 
   const topCustomers = useMemo(() => {
     const map = new Map<string, number>();
-    periodInvoices.forEach((i) => map.set(i.customerId, (map.get(i.customerId) ?? 0) + i.amount + i.gst + i.transportation));
+    periodInvoices.forEach((i) => map.set(i.customerId, (map.get(i.customerId) ?? 0) + i.amount - i.discountAmount + i.gst + i.transportation));
     return Array.from(map.entries())
       .map(([id, amount]) => ({ name: customers.find((c) => c.id === id)?.name ?? '—', amount }))
       .sort((a, b) => b.amount - a.amount)
@@ -100,13 +100,50 @@ export default function Reports() {
   const quotationSummary = useMemo(() => {
     const pending = periodQuotations.filter((q) => q.status === 'pending');
     const converted = periodQuotations.filter((q) => q.status === 'converted');
+    // Net out each quotation's own discount, same as invoice totals do
+    // above — otherwise this overstates both the quoted and won totals now
+    // that quotations carry a real slab/discount.
     return {
       pendingCount: pending.length,
-      pendingAmount: pending.reduce((sum, q) => sum + q.amount + q.gst, 0),
+      pendingAmount: pending.reduce((sum, q) => sum + q.amount - q.discountAmount + q.gst, 0),
       convertedCount: converted.length,
-      convertedAmount: converted.reduce((sum, q) => sum + q.amount + q.gst, 0),
+      convertedAmount: converted.reduce((sum, q) => sum + q.amount - q.discountAmount + q.gst, 0),
     };
   }, [periodQuotations]);
+
+  const slabBreakdown = useMemo(() => {
+    const buckets: Record<InvoiceSlab, { count: number; customers: Set<string>; amount: number }> = {
+      A: { count: 0, customers: new Set(), amount: 0 },
+      B: { count: 0, customers: new Set(), amount: 0 },
+      C: { count: 0, customers: new Set(), amount: 0 },
+      D: { count: 0, customers: new Set(), amount: 0 },
+    };
+    periodInvoices.forEach((i) => {
+      const b = buckets[i.slab];
+      b.count += 1;
+      b.customers.add(i.customerId);
+      b.amount += i.amount - i.discountAmount + i.gst + i.transportation;
+    });
+    return (['A', 'B', 'C', 'D'] as InvoiceSlab[]).map((slab) => ({
+      slab,
+      percentLabel: slab === 'D' ? 'custom %' : `${SLAB_DISCOUNT_PERCENT[slab]}%`,
+      invoiceCount: buckets[slab].count,
+      customerCount: buckets[slab].customers.size,
+      amount: buckets[slab].amount,
+    }));
+  }, [periodInvoices]);
+
+  const gstSplit = useMemo(() => {
+    const withGst = { count: 0, amount: 0 };
+    const withoutGst = { count: 0, amount: 0 };
+    periodInvoices.forEach((i) => {
+      const total = i.amount - i.discountAmount + i.gst + i.transportation;
+      const bucket = i.gst > 0 ? withGst : withoutGst;
+      bucket.count += 1;
+      bucket.amount += total;
+    });
+    return { withGst, withoutGst };
+  }, [periodInvoices]);
 
   const totalReceivable = customers.reduce((sum, c) => sum + c.outstanding, 0);
   const totalPayable = vendors.reduce((sum, v) => sum + v.payable, 0);
@@ -293,6 +330,57 @@ export default function Reports() {
               <div className="stat-label">Converted to invoice</div>
               <div className="stat-value num" style={{ color: 'var(--success)' }}>{quotationSummary.convertedCount}</div>
               <div className="stat-delta up">{formatINR(quotationSummary.convertedAmount)} won</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="two-col">
+          <div className="panel">
+            <div className="panel-head">
+              <h3>Slab breakdown — {periodLabel.toLowerCase()}</h3>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Slab</th>
+                  <th>Invoices</th>
+                  <th>Customers</th>
+                  <th>Business</th>
+                </tr>
+              </thead>
+              <tbody>
+                {slabBreakdown.map((s) => (
+                  <tr key={s.slab}>
+                    <td>Slab {s.slab} <span className="row-sub">({s.percentLabel})</span></td>
+                    <td className="num">{s.invoiceCount}</td>
+                    <td className="num">{s.customerCount}</td>
+                    <td className="num">{formatINR(s.amount)}</td>
+                  </tr>
+                ))}
+                {periodInvoices.length === 0 && (
+                  <tr>
+                    <td className="row-sub">No invoices in this period.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="panel">
+            <div className="panel-head">
+              <h3>GST vs non-GST business — {periodLabel.toLowerCase()}</h3>
+            </div>
+            <div className="stat-grid" style={{ padding: 20, marginBottom: 0 }}>
+              <div className="facet-card">
+                <div className="stat-label">With GST</div>
+                <div className="stat-value num">{formatINR(gstSplit.withGst.amount)}</div>
+                <div className="stat-delta">{gstSplit.withGst.count} invoice{gstSplit.withGst.count === 1 ? '' : 's'}</div>
+              </div>
+              <div className="facet-card">
+                <div className="stat-label">Without GST</div>
+                <div className="stat-value num">{formatINR(gstSplit.withoutGst.amount)}</div>
+                <div className="stat-delta">{gstSplit.withoutGst.count} invoice{gstSplit.withoutGst.count === 1 ? '' : 's'}</div>
+              </div>
             </div>
           </div>
         </div>

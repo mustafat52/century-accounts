@@ -25,7 +25,7 @@ export default function PaymentModal() {
   if (!isPaymentModalOpen || !invoice) return null;
 
   const amountNum = parseFloat(amount) || 0;
-  const total = invoice.amount + invoice.gst + invoice.transportation;
+  const total = invoice.amount - invoice.discountAmount + invoice.gst + invoice.transportation;
 
   const handleSave = async () => {
     if (amountNum <= 0 || amountNum > invoice.balance || !paymentModalInvoiceDbId) return;

@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Topbar from '../components/Topbar';
 import StatusBadge from '../components/StatusBadge';
 import PaymentModal from '../components/PaymentModal';
@@ -22,13 +23,25 @@ export default function Invoicing() {
     quotations,
     customers,
     openPrint,
-    convertQuotationToInvoice,
+    openConvertQuotationModal,
     openEditQuotationModal,
     markJobCompleted,
     openPaymentModal,
   } = useApp();
-  const [tab, setTab] = useState<'invoices' | 'quotations'>('invoices');
-  const [filter, setFilter] = useState<InvoiceStatus | 'all'>('all');
+  // URL-driven (not local state) so converting a quotation from anywhere —
+  // the table row, or the print preview overlay — can land the user back
+  // on the Invoices tab via navigate('/invoicing?tab=invoices'), even
+  // though this component doesn't unmount in between.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: 'invoices' | 'quotations' = searchParams.get('tab') === 'quotations' ? 'quotations' : 'invoices';
+  const setTab = (t: 'invoices' | 'quotations') => setSearchParams(t === 'invoices' ? {} : { tab: t });
+  const filter = (searchParams.get('status') as InvoiceStatus | 'all') || 'all';
+  const setFilter = (f: InvoiceStatus | 'all') => {
+    const next = new URLSearchParams(searchParams);
+    if (f === 'all') next.delete('status');
+    else next.set('status', f);
+    setSearchParams(next);
+  };
 
   const customerName = (id: string) => customers.find((c) => c.id === id)?.name ?? '—';
 
@@ -99,7 +112,7 @@ export default function Invoicing() {
                       </td>
                       <td className="row-sub">{i.description}</td>
                       <td className="num">
-                        {formatINR(i.amount + i.gst + i.transportation)}
+                        {formatINR(i.amount - i.discountAmount + i.gst + i.transportation)}
                         {i.gst > 0 && (
                           <div className="row-sub">
                             CGST {formatINR(i.gst / 2)} + SGST {formatINR(i.gst / 2)}
@@ -172,7 +185,12 @@ export default function Invoicing() {
                     <td>{customerName(q.customerId)}</td>
                     <td className="row-sub">{q.description}</td>
                     <td className="num">
-                      {formatINR(q.amount + q.gst)}
+                      {formatINR(q.amount - q.discountAmount + q.gst)}
+                      {q.discountAmount > 0 && (
+                        <div className="row-sub">
+                          Slab {q.slab} · −{formatINR(q.discountAmount)}
+                        </div>
+                      )}
                       {q.gst > 0 && <div className="row-sub">incl. {formatINR(q.gst)} GST</div>}
                     </td>
                     <td className="row-sub">{q.validUntil}</td>
@@ -195,7 +213,7 @@ export default function Invoicing() {
                           </button>
                           <button
                             className="btn btn-primary btn-small desktop-only"
-                            onClick={() => convertQuotationToInvoice(q.dbId)}
+                            onClick={() => openConvertQuotationModal(q.dbId)}
                           >
                             Convert
                           </button>

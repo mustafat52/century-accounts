@@ -128,7 +128,7 @@ export default function Customers() {
                     </td>
                     <td className="row-sub">{i.description}</td>
                     <td className="num">
-                      {formatINR(i.amount + i.gst + i.transportation)}
+                      {formatINR(i.amount - i.discountAmount + i.gst + i.transportation)}
                       {i.gst > 0 && <div className="row-sub">incl. {formatINR(i.gst)} GST</div>}
                       {i.transportation > 0 && <div className="row-sub">+ {formatINR(i.transportation)} transport</div>}
                     </td>

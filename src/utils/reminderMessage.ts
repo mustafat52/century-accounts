@@ -2,7 +2,7 @@ import type { Invoice } from '../types';
 import { formatINR } from './format';
 
 export function buildReminderMessage(invoice: Invoice, customerName: string): string {
-  const total = invoice.amount + invoice.gst + invoice.transportation;
+  const total = invoice.amount - invoice.discountAmount + invoice.gst + invoice.transportation;
   const lines: string[] = [];
 
   lines.push(`Dear ${customerName},`);

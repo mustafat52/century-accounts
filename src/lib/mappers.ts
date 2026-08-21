@@ -11,6 +11,9 @@ import type {
   ImportantLink,
   DashboardSummary,
   VendorPurchase,
+  PriceListItem,
+  VendorSlip,
+  VendorSlipItem,
 } from '../types';
 
 // These mirror the Supabase table/view column names (snake_case).
@@ -46,7 +49,7 @@ export function mapInvoiceItem(row: any): InvoiceItem {
     id: row.id,
     itemType: row.item_type,
     description: row.description,
-    slab: row.slab ?? null,
+    thicknessMm: row.thickness_mm ?? null,
     sortOrder: Number(row.sort_order ?? 0),
     amount: Number(row.amount),
     quantity: numOrNull(row.quantity),
@@ -67,22 +70,29 @@ export function mapInvoiceItem(row: any): InvoiceItem {
 
 // `items` must be pre-grouped by invoice_id and passed in (see AppContext).
 export function mapInvoice(row: any, items: InvoiceItem[] = []): Invoice {
+  const amount = Number(row.amount);
+  const discountAmount = Number(row.discount_amount ?? 0);
+  const gst = Number(row.gst);
+  const transportation = Number(row.transportation ?? 0);
   return {
     id: row.invoice_no,
     dbId: row.id,
     customerId: row.customer_id,
     kind: row.kind,
     description: row.description,
-    amount: Number(row.amount),
-    gst: Number(row.gst),
-    transportation: Number(row.transportation ?? 0),
+    amount,
+    slab: row.slab ?? 'A',
+    discountPercent: Number(row.discount_percent ?? 0),
+    discountAmount,
+    gst,
+    transportation,
     date: row.invoice_date,
     dueDate: row.due_date ?? null,
     status: row.effective_status ?? row.status,
     workStatus: row.work_status ?? null,
     completedAt: row.completed_at ?? null,
     paidAmount: Number(row.paid_amount ?? 0),
-    balance: Number(row.balance ?? Number(row.amount) + Number(row.gst) + Number(row.transportation ?? 0)),
+    balance: Number(row.balance ?? (amount - discountAmount + gst + transportation)),
     items,
   };
 }
@@ -94,6 +104,9 @@ export function mapQuotation(row: any): Quotation {
     customerId: row.customer_id,
     description: row.description,
     amount: Number(row.amount),
+    slab: row.slab ?? 'A',
+    discountPercent: Number(row.discount_percent ?? 0),
+    discountAmount: Number(row.discount_amount ?? 0),
     gst: Number(row.gst),
     date: row.quotation_date,
     validUntil: row.valid_until,
@@ -159,5 +172,43 @@ export function mapVendorPurchase(row: any): VendorPurchase {
     paidAmount: Number(row.paid_amount),
     balance: Number(row.balance),
     paymentStatus: row.payment_status,
+  };
+}
+
+export function mapPriceListItem(row: any): PriceListItem {
+  return {
+    id: row.id,
+    description: row.description,
+    ratePerSft: Number(row.rate_per_sft),
+    polishRate: Number(row.polish_rate),
+    fixingRate: Number(row.fixing_rate),
+    sortOrder: Number(row.sort_order ?? 0),
+  };
+}
+
+export function mapVendorSlipItem(row: any): VendorSlipItem {
+  return {
+    id: row.id,
+    description: row.description,
+    quantity: Number(row.quantity),
+    unit: row.unit,
+    rate: row.rate === null || row.rate === undefined ? null : Number(row.rate),
+    amount: row.amount === null || row.amount === undefined ? null : Number(row.amount),
+    sortOrder: Number(row.sort_order ?? 0),
+  };
+}
+
+// `items` must be pre-grouped by slip_id and passed in (see AppContext).
+export function mapVendorSlip(row: any, items: VendorSlipItem[] = []): VendorSlip {
+  return {
+    id: row.id,
+    dcNo: row.dc_no,
+    vendorId: row.vendor_id,
+    careOf: row.care_of,
+    status: row.status,
+    slipDate: row.slip_date,
+    pricedAt: row.priced_at ?? null,
+    expenseId: row.expense_id ?? null,
+    items,
   };
 }

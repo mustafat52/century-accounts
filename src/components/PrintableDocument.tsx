@@ -3,9 +3,87 @@ import { formatINR } from '../utils/format';
 import logoLight from '../assets/logo-light.png';
 
 export default function PrintableDocument() {
-  const { printTarget, closePrint, invoices, quotations, customers, convertQuotationToInvoice } = useApp();
+  const { printTarget, closePrint, invoices, quotations, customers, vendors, vendorSlips, openConvertQuotationModal } =
+    useApp();
 
   if (!printTarget) return null;
+
+  if (printTarget.kind === 'slip') {
+    const slip = vendorSlips.find((s) => s.id === printTarget.id);
+    if (!slip) return null;
+    const vendor = vendors.find((v) => v.id === slip.vendorId);
+
+    return (
+      <div className="receipt-overlay">
+        <div className="receipt-toolbar no-print">
+          <button className="btn btn-ghost" onClick={() => window.print()}>
+            Print
+          </button>
+          <button className="btn btn-ghost" onClick={closePrint}>
+            Close
+          </button>
+        </div>
+
+        <div className="receipt-page">
+          <div className="receipt-head">
+            <div>
+              <img src={logoLight} alt="Century Glass Art" style={{ width: 130, height: 'auto', marginBottom: 4 }} />
+              <div style={{ fontSize: 11, color: '#666', marginTop: 4, lineHeight: 1.4 }}>
+                11-1-268, X Road, opposite Hameed Cafe, Darus Salam, Aghapura, Nampally, Hyderabad, Telangana 500001
+                <br />
+                centuryglassart@gmail.com
+                <br />
+                GSTIN: 36AMJPH2003H1ZI
+              </div>
+            </div>
+            <div className="receipt-meta">
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#1a1a1a' }}>PURCHASE SLIP</div>
+              <div style={{ marginTop: 6 }}>{slip.dcNo}</div>
+              <div>Date: {slip.slipDate}</div>
+              <div>Care of: {slip.careOf}</div>
+            </div>
+          </div>
+
+          <div className="receipt-section-label">Vendor</div>
+          <div style={{ fontSize: 13, marginBottom: 16 }}>
+            <div style={{ fontWeight: 700 }}>{vendor?.name ?? 'Unknown vendor'}</div>
+            <div style={{ color: '#555' }}>{vendor?.contact}</div>
+          </div>
+
+          <div className="receipt-section-label">Items Requested</div>
+          <table className="receipt-table" style={{ fontSize: 11 }}>
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th style={{ textAlign: 'right' }}>Quantity</th>
+                <th style={{ textAlign: 'right' }}>Unit</th>
+                <th style={{ textAlign: 'right' }}>Rate</th>
+                <th style={{ textAlign: 'right' }}>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {slip.items.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.description}</td>
+                  <td style={{ textAlign: 'right' }}>{item.quantity}</td>
+                  <td style={{ textAlign: 'right' }}>{item.unit}</td>
+                  <td style={{ textAlign: 'right' }}></td>
+                  <td style={{ textAlign: 'right' }}></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="receipt-footer">
+            <div>Please enter your rates against each item above and return this slip.</div>
+            <div className="receipt-signature">
+              <div className="receipt-signature-line">For Century Glass Art</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const customer = (id: string) => customers.find((c) => c.id === id);
 
@@ -18,7 +96,10 @@ export default function PrintableDocument() {
   const cust = customer(doc.customerId);
   const isInvoice = printTarget.kind === 'invoice';
   const transportation = invoice?.transportation ?? 0;
-  const total = doc.amount + doc.gst + transportation;
+  const discountAmount = invoice?.discountAmount ?? quotation?.discountAmount ?? 0;
+  const discountPercent = invoice?.discountPercent ?? quotation?.discountPercent ?? 0;
+  const slab = invoice?.slab ?? quotation?.slab ?? 'A';
+  const total = doc.amount - discountAmount + doc.gst + transportation;
   const cgst = doc.gst / 2;
   const sgst = doc.gst / 2;
 
@@ -35,7 +116,7 @@ export default function PrintableDocument() {
           <button
             className="btn btn-primary"
             onClick={() => {
-              convertQuotationToInvoice(quotation.dbId);
+              openConvertQuotationModal(quotation.dbId);
               closePrint();
             }}
           >
@@ -70,6 +151,9 @@ export default function PrintableDocument() {
             <div>Date: {doc.date}</div>
             {isInvoice && invoice && <div>Due: {invoice.dueDate ?? 'Set on completion'}</div>}
             {!isInvoice && quotation && <div>Valid until: {quotation.validUntil}</div>}
+            {isInvoice && invoice && (
+              <div style={{ fontSize: 9, color: '#ccc', marginTop: 4 }}>Ref {invoice.slab}</div>
+            )}
           </div>
         </div>
 
@@ -148,6 +232,12 @@ export default function PrintableDocument() {
             <span>Subtotal</span>
             <span>{formatINR(doc.amount)}</span>
           </div>
+          {discountAmount > 0 && (
+            <div className="receipt-totals-row">
+              <span>Discount (Slab {slab} · {discountPercent}%)</span>
+              <span>−{formatINR(discountAmount)}</span>
+            </div>
+          )}
           {doc.gst > 0 && (
             <>
               <div className="receipt-totals-row">
@@ -184,28 +274,31 @@ export default function PrintableDocument() {
           )}
         </div>
 
-        <div className="receipt-section-label" style={{ marginTop: 20 }}>
-          Bank Details
-        </div>
-        <div style={{ fontSize: 11, color: '#555', marginBottom: 8, lineHeight: 1.5 }}>
-          <div>Company Name - Century Glass Art</div>
-          <div>Bank Name - KOTAK MAHINDRA BANK</div>
-          <div>Branch - N.S Road</div>
-          <div>Account No – 7113145246</div>
-          <div>IFSC Code - KKBK0007452</div>
-        </div>
-
-        <div className="receipt-section-label">Terms &amp; Conditions</div>
-        <div style={{ fontSize: 9.5, color: '#555', lineHeight: 1.4, marginBottom: 4 }}>
-          <div>1. Delivery: 15 days from date of receipt of confirmation, PO and Final sizes along with fabrication drawings.</div>
-          <div>2. Payment Terms: 70% Advance 20% on Delivery 10% on Completion</div>
-          <div>3. These glasses are custom made for you and the order cannot be altered / cancelled after confirmation.</div>
-          <div>4. Receive the above-mentioned articles as per your order in good condition</div>
-          <div>5. Our Responsibility ceases no sooner the Goods leave our premises</div>
-          <div>6. Quotation Validity - 2 days.</div>
-          <div>7. We do not give guarantee on scratches</div>
-          <div>8. All disputes shall be subject to Hyderabad Jurisdiction only.</div>
-          <div>9. E &amp; O.E</div>
+        <div className="receipt-two-col">
+          <div>
+            <div className="receipt-section-label">Bank Details</div>
+            <div style={{ fontSize: 11, color: '#555', lineHeight: 1.5 }}>
+              <div>Company Name - Century Glass Art</div>
+              <div>Bank Name - KOTAK MAHINDRA BANK</div>
+              <div>Branch - N.S Road</div>
+              <div>Account No – 7113145246</div>
+              <div>IFSC Code - KKBK0007452</div>
+            </div>
+          </div>
+          <div>
+            <div className="receipt-section-label">Terms &amp; Conditions</div>
+            <div style={{ fontSize: 9.5, color: '#555', lineHeight: 1.4 }}>
+              <div>1. Delivery: 15 days from date of receipt of confirmation, PO and Final sizes along with fabrication drawings.</div>
+              <div>2. Payment Terms: 70% Advance 20% on Delivery 10% on Completion</div>
+              <div>3. These glasses are custom made for you and the order cannot be altered / cancelled after confirmation.</div>
+              <div>4. Receive the above-mentioned articles as per your order in good condition</div>
+              <div>5. Our Responsibility ceases no sooner the Goods leave our premises</div>
+              <div>6. Quotation Validity - 2 days.</div>
+              <div>7. We do not give guarantee on scratches</div>
+              <div>8. All disputes shall be subject to Hyderabad Jurisdiction only.</div>
+              <div>9. E &amp; O.E</div>
+            </div>
+          </div>
         </div>
 
         <div className="receipt-footer">

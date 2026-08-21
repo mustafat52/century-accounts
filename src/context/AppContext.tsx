@@ -8,14 +8,19 @@ import type {
   Invoice,
   InvoiceItem,
   InvoiceKind,
-  ItemSlab,
+  InvoiceSlab,
   Quotation,
   MonthlyFigure,
   Worker,
   ImportantLink,
   DashboardSummary,
   VendorPurchase,
+  PriceListItem,
+  VendorSlip,
+  VendorSlipItem,
+  CareOf,
 } from '../types';
+import { SLAB_DISCOUNT_PERCENT } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import {
   mapCustomerBalance,
@@ -29,20 +34,22 @@ import {
   mapImportantLink,
   mapDashboardSummary,
   mapVendorPurchase,
+  mapPriceListItem,
+  mapVendorSlip,
+  mapVendorSlipItem,
 } from '../lib/mappers';
 
 export type NewInvoiceItemInput =
   | {
       type: 'simple';
       description: string;
-      slab: ItemSlab | null;
       quantity: number;
       rate: number;
     }
   | {
       type: 'glass';
       description: string;
-      slab: ItemSlab | null;
+      thicknessMm?: string | null;
       lengthIn: number;
       widthIn: number;
       qty: number;
@@ -56,7 +63,6 @@ export type NewQuotationItemInput =
       type: 'simple';
       description: string;
       area: string | null;
-      slab: ItemSlab | null;
       quantity: number;
       rate: number;
     }
@@ -64,7 +70,6 @@ export type NewQuotationItemInput =
       type: 'glass';
       description: string;
       area: string | null;
-      slab: ItemSlab | null;
       thicknessMm: string | null;
       lengthIn: number;
       widthIn: number;
@@ -79,12 +84,14 @@ interface NewInvoiceInput {
   kind: InvoiceKind;
   dueDate: string | null;
   transportation: number;
+  slab: InvoiceSlab;
+  discountPercent: number; // only meaningful when slab === 'D'; otherwise derived from SLAB_DISCOUNT_PERCENT
   items: NewInvoiceItemInput[];
 }
 
 interface NewCustomerInput {
   name: string;
-  contact: string;
+  contact?: string;
   address?: string;
   gstin?: string;
 }
@@ -110,14 +117,30 @@ interface NewVendorPurchaseInput {
   date: string;
 }
 
+interface NewVendorSlipItemInput {
+  description: string;
+  quantity: number;
+  unit: string;
+}
+
+interface NewVendorSlipInput {
+  vendorId: string;
+  careOf: CareOf;
+  items: NewVendorSlipItemInput[];
+}
+
 interface NewQuotationInput {
   customerId: string;
   validUntil: string;
+  slab: InvoiceSlab;
+  discountPercent: number; // only meaningful when slab === 'D'; otherwise derived from SLAB_DISCOUNT_PERCENT
   items: NewQuotationItemInput[];
 }
 
 interface EditQuotationInput {
   validUntil: string;
+  slab: InvoiceSlab;
+  discountPercent: number;
   items: NewQuotationItemInput[];
 }
 
@@ -139,6 +162,13 @@ interface NewLinkInput {
   category?: string;
 }
 
+interface NewPriceListItemInput {
+  description: string;
+  ratePerSft: number;
+  polishRate: number;
+  fixingRate: number;
+}
+
 export interface PaymentReceipt {
   paymentAmount: number;
   paymentDate: string;
@@ -146,7 +176,7 @@ export interface PaymentReceipt {
   invoice: Invoice;
 }
 
-export type PrintTarget = { kind: 'invoice' | 'quotation'; id: string } | null;
+export type PrintTarget = { kind: 'invoice' | 'quotation' | 'slip'; id: string } | null;
 
 interface AppContextValue {
   gstEnabled: boolean;
@@ -163,7 +193,11 @@ interface AppContextValue {
 
   vendorPurchases: VendorPurchase[];
   addVendorPurchase: (input: NewVendorPurchaseInput) => Promise<void>;
-  recordVendorPayment: (expenseId: string, amount: number, note?: string) => Promise<void>;
+  recordVendorPayment: (vendorId: string, amount: number, note?: string) => Promise<void>;
+
+  vendorSlips: VendorSlip[];
+  addVendorSlip: (input: NewVendorSlipInput) => Promise<VendorSlip | null>;
+  priceVendorSlip: (slipId: string, itemRates: { itemId: string; rate: number }[]) => Promise<void>;
 
   monthlyFigures: MonthlyFigure[];
   dashboardSummary: DashboardSummary;
@@ -176,7 +210,8 @@ interface AppContextValue {
   quotations: Quotation[];
   addQuotation: (input: NewQuotationInput) => Promise<Quotation | null>;
   updateQuotation: (quotationDbId: string, input: EditQuotationInput) => Promise<void>;
-  convertQuotationToInvoice: (quotationDbId: string) => Promise<void>;
+  fetchQuotationItems: (quotationDbId: string) => Promise<NewQuotationItemInput[]>;
+  convertQuotationToInvoice: (quotationDbId: string, slab: InvoiceSlab, discountPercent: number) => Promise<void>;
 
   workers: Worker[];
   addWorker: (input: NewWorkerInput) => Promise<void>;
@@ -184,6 +219,11 @@ interface AppContextValue {
 
   links: ImportantLink[];
   addLink: (input: NewLinkInput) => Promise<void>;
+
+  priceList: PriceListItem[];
+  addPriceListItem: (input: NewPriceListItemInput) => Promise<void>;
+  updatePriceListItem: (id: string, input: NewPriceListItemInput) => Promise<void>;
+  deletePriceListItem: (id: string) => Promise<void>;
 
   isInvoiceModalOpen: boolean;
   invoiceModalCustomerId: string | null;
@@ -227,8 +267,13 @@ interface AppContextValue {
   openPaymentModal: (invoiceDbId: string) => void;
   closePaymentModal: () => void;
 
+  isConvertQuotationModalOpen: boolean;
+  convertQuotationModalId: string | null;
+  openConvertQuotationModal: (quotationDbId: string) => void;
+  closeConvertQuotationModal: () => void;
+
   printTarget: PrintTarget;
-  openPrint: (kind: 'invoice' | 'quotation', id: string) => void;
+  openPrint: (kind: 'invoice' | 'quotation' | 'slip', id: string) => void;
   closePrint: () => void;
 
   paymentReceipt: PaymentReceipt | null;
@@ -252,12 +297,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [vendorPurchases, setVendorPurchases] = useState<VendorPurchase[]>([]);
+  const [vendorSlips, setVendorSlips] = useState<VendorSlip[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [monthlyFigures, setMonthlyFigures] = useState<MonthlyFigure[]>([]);
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary>(EMPTY_SUMMARY);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [links, setLinks] = useState<ImportantLink[]>([]);
+  const [priceList, setPriceList] = useState<PriceListItem[]>([]);
 
   const [isInvoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [invoiceModalCustomerId, setInvoiceModalCustomerId] = useState<string | null>(null);
@@ -273,6 +320,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isLinkModalOpen, setLinkModalOpen] = useState(false);
   const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
   const [paymentModalInvoiceDbId, setPaymentModalInvoiceDbId] = useState<string | null>(null);
+  const [isConvertQuotationModalOpen, setConvertQuotationModalOpen] = useState(false);
+  const [convertQuotationModalId, setConvertQuotationModalId] = useState<string | null>(null);
   const [printTarget, setPrintTarget] = useState<PrintTarget>(null);
   const [paymentReceipt, setPaymentReceipt] = useState<PaymentReceipt | null>(null);
 
@@ -299,6 +348,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (data) setVendorPurchases(data.map(mapVendorPurchase));
   }, []);
 
+  const refreshVendorSlips = useCallback(async () => {
+    const [slipsRes, itemsRes] = await Promise.all([
+      supabase.from('vendor_slips').select('*').order('created_at', { ascending: false }),
+      supabase.from('vendor_slip_items').select('*').order('sort_order'),
+    ]);
+    if (slipsRes.data) {
+      const itemsBySlip = new Map<string, VendorSlipItem[]>();
+      (itemsRes.data ?? []).forEach((row: any) => {
+        const list = itemsBySlip.get(row.slip_id) ?? [];
+        list.push(mapVendorSlipItem(row));
+        itemsBySlip.set(row.slip_id, list);
+      });
+      setVendorSlips(slipsRes.data.map((row: any) => mapVendorSlip(row, itemsBySlip.get(row.id) ?? [])));
+    }
+  }, []);
+
   const refreshWorkers = useCallback(async () => {
     const { data } = await supabase.from('worker_month_summary').select('*').order('name');
     if (data) setWorkers(data.map(mapWorker));
@@ -316,6 +381,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const refreshDashboardSummary = useCallback(async () => {
     const { data } = await supabase.from('dashboard_summary').select('*').single();
     if (data) setDashboardSummary(mapDashboardSummary(data));
+  }, []);
+
+  const refreshPriceList = useCallback(async () => {
+    const { data } = await supabase.from('price_list').select('*').order('sort_order');
+    if (data) setPriceList(data.map(mapPriceListItem));
   }, []);
 
   const fetchInvoiceEffective = useCallback(async (dbId: string): Promise<Invoice | null> => {
@@ -343,6 +413,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       workersRes,
       linksRes,
       summaryRes,
+      priceListRes,
+      vendorSlipsRes,
+      vendorSlipItemsRes,
     ] = await Promise.all([
       supabase.from('business_settings').select('*').single(),
       supabase.from('customer_balances').select('*').order('name'),
@@ -356,6 +429,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       supabase.from('worker_month_summary').select('*').order('name'),
       supabase.from('important_links').select('*').order('sort_order'),
       supabase.from('dashboard_summary').select('*').single(),
+      supabase.from('price_list').select('*').order('sort_order'),
+      supabase.from('vendor_slips').select('*').order('created_at', { ascending: false }),
+      supabase.from('vendor_slip_items').select('*').order('sort_order'),
     ]);
 
     if (settingsRes.data) setGstEnabled(settingsRes.data.gst_enabled);
@@ -379,6 +455,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (workersRes.data) setWorkers(workersRes.data.map(mapWorker));
     if (linksRes.data) setLinks(linksRes.data.map(mapImportantLink));
     if (summaryRes.data) setDashboardSummary(mapDashboardSummary(summaryRes.data));
+    if (priceListRes.data) setPriceList(priceListRes.data.map(mapPriceListItem));
+
+    if (vendorSlipsRes.data) {
+      const itemsBySlip = new Map<string, VendorSlipItem[]>();
+      (vendorSlipItemsRes.data ?? []).forEach((row: any) => {
+        const list = itemsBySlip.get(row.slip_id) ?? [];
+        list.push(mapVendorSlipItem(row));
+        itemsBySlip.set(row.slip_id, list);
+      });
+      setVendorSlips(vendorSlipsRes.data.map((row: any) => mapVendorSlip(row, itemsBySlip.get(row.id) ?? [])));
+    }
 
     setDataLoading(false);
   }, []);
@@ -439,7 +526,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const addCustomer = async (input: NewCustomerInput): Promise<Customer | null> => {
     const { data, error } = await supabase
       .from('customers')
-      .insert({ name: input.name, contact: input.contact, address: input.address || null, gstin: input.gstin || null })
+      .insert({ name: input.name, contact: input.contact || null, address: input.address || null, gstin: input.gstin || null })
       .select()
       .single();
     if (error || !data) return null;
@@ -518,23 +605,91 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await refreshVendors();
   };
 
-  const recordVendorPayment = async (expenseId: string, amount: number, note?: string) => {
-    const { error } = await supabase.from('vendor_payments').insert({ expense_id: expenseId, amount, note: note || null });
+  // Pays down a vendor's total payable in one shot — the RPC allocates the
+  // amount across that vendor's outstanding purchases oldest-first, so
+  // individual purchase/slip statuses still update correctly underneath.
+  const recordVendorPayment = async (vendorId: string, amount: number, note?: string) => {
+    const { error } = await supabase.rpc('record_vendor_payment', {
+      p_vendor_id: vendorId,
+      p_amount: amount,
+      p_note: note || null,
+    });
     if (error) return;
     await Promise.all([refreshVendorPurchases(), refreshVendors()]);
   };
+
+  // ---------- Vendor slips (DC) ----------
+  // Created with quantities only — no prices. Printed, sent to the vendor,
+  // and re-opened later (see priceVendorSlip) once the vendor's rates come
+  // back. Mirrors addVendorPurchase's insert-then-fetch shape rather than
+  // an RPC, since there's nothing transactional to protect yet — the
+  // pricing step is where atomicity (and the lock) actually matters.
+  const addVendorSlip = async (input: NewVendorSlipInput): Promise<VendorSlip | null> => {
+    if (input.items.length === 0) return null;
+
+    const { data: slipRow, error: slipErr } = await supabase
+      .from('vendor_slips')
+      .insert({ vendor_id: input.vendorId, care_of: input.careOf })
+      .select()
+      .single();
+    if (slipErr || !slipRow) return null;
+
+    const itemRows = input.items.map((it, idx) => ({
+      slip_id: slipRow.id,
+      description: it.description,
+      quantity: it.quantity,
+      unit: it.unit,
+      sort_order: idx,
+    }));
+
+    const { error: itemsErr } = await supabase.from('vendor_slip_items').insert(itemRows);
+    if (itemsErr) {
+      await supabase.from('vendor_slips').delete().eq('id', slipRow.id);
+      return null;
+    }
+
+    const { data: itemsData } = await supabase
+      .from('vendor_slip_items')
+      .select('*')
+      .eq('slip_id', slipRow.id)
+      .order('sort_order');
+    const newSlip = mapVendorSlip(slipRow, (itemsData ?? []).map(mapVendorSlipItem));
+    setVendorSlips((prev) => [newSlip, ...prev]);
+    return newSlip;
+  };
+
+  // Fills in rate/amount per line, totals the slip, creates the matching
+  // expense row, and locks it — all atomically via the RPC. Once this
+  // resolves the slip behaves like any other vendor purchase (payable,
+  // Record Payment, etc.) via refreshVendorPurchases/refreshVendors.
+  const priceVendorSlip = async (slipId: string, itemRates: { itemId: string; rate: number }[]) => {
+    const { error } = await supabase.rpc('price_vendor_slip', {
+      p_slip_id: slipId,
+      p_items: itemRates.map((r) => ({ id: r.itemId, rate: r.rate })),
+    });
+    if (error) return;
+    await Promise.all([refreshVendorSlips(), refreshVendorPurchases(), refreshVendors()]);
+  };
+
+  // Glass is billed in 6-inch increments — any entered length/width rounds
+  // UP to the next multiple of 6, never to the nearest one (46in bills as
+  // 48in, not 45in). This is the billed dimension, so it's what gets
+  // stored on the item row too, not the raw typed value.
+  const roundUpTo6 = (n: number) => (n > 0 ? Math.ceil(n / 6) * 6 : 0);
 
   // ---------- Invoices ----------
   const addInvoice = async (input: NewInvoiceInput): Promise<Invoice | null> => {
     const computed = input.items.map((i) => {
       if (i.type === 'glass') {
-        const sft = Math.round(((i.lengthIn * i.widthIn) / 144) * i.qty * 100) / 100;
+        const lengthIn = roundUpTo6(i.lengthIn);
+        const widthIn = roundUpTo6(i.widthIn);
+        const sft = Math.round(((lengthIn * widthIn) / 144) * i.qty * 100) / 100;
         const workGlass = Math.round(sft * i.ratePerSft * 100) / 100;
-        const rft = Math.round(((2 * (i.lengthIn + i.widthIn)) / 12) * i.qty * 100) / 100;
+        const rft = Math.round(((2 * (lengthIn + widthIn)) / 12) * i.qty * 100) / 100;
         const polishAmt = Math.round(rft * (i.polishRate || 0) * 100) / 100;
         const fixingAmt = Math.round(sft * (i.fixingRatePerSft || 0) * 100) / 100;
         const amount = workGlass + polishAmt + fixingAmt;
-        return { ...i, sft, workGlass, rft, polishAmt, fixingAmt, amount };
+        return { ...i, lengthIn, widthIn, sft, workGlass, rft, polishAmt, fixingAmt, amount };
       }
       const amount = Math.round(i.quantity * i.rate * 100) / 100;
       return { ...i, amount };
@@ -543,7 +698,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const subtotal = computed.reduce((sum, i) => sum + i.amount, 0);
     if (subtotal <= 0) return null;
 
-    const gst = gstEnabled ? Math.round(subtotal * 0.18 * 100) / 100 : 0;
+    // Discount is calculated on the subtotal, before tax. A/B/C are fixed
+    // tiers; D is a custom percent typed in per-invoice. One slab per bill.
+    const discountPercent = input.slab === 'D' ? input.discountPercent || 0 : SLAB_DISCOUNT_PERCENT[input.slab];
+    const discountAmount = Math.round(subtotal * (discountPercent / 100) * 100) / 100;
+    const taxableValue = subtotal - discountAmount;
+    const gst = gstEnabled ? Math.round(taxableValue * 0.18 * 100) / 100 : 0;
     const summary = computed.slice(0, 3).map((i) => i.description).join(', ') || 'Invoice';
 
     const { data: invoiceRow, error: invoiceErr } = await supabase
@@ -553,6 +713,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         kind: input.kind,
         description: summary,
         amount: subtotal,
+        slab: input.slab,
+        discount_percent: discountPercent,
+        discount_amount: discountAmount,
         gst,
         transportation: input.transportation || 0,
         due_date: input.kind === 'quick' ? input.dueDate : null,
@@ -569,7 +732,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             invoice_id: invoiceRow.id,
             item_type: 'glass',
             description: i.description,
-            slab: i.slab || null,
+            thickness_mm: i.thicknessMm || null,
             sort_order: idx,
             length_in: i.lengthIn,
             width_in: i.widthIn,
@@ -588,7 +751,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             invoice_id: invoiceRow.id,
             item_type: 'simple',
             description: i.description,
-            slab: i.slab || null,
             sort_order: idx,
             quantity: i.quantity,
             rate: i.rate,
@@ -645,11 +807,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   // ---------- Quotations ----------
+  // Reuses the same roundUpTo6 defined above (invoices section) — must
+  // match the client-side preview exactly, or the modal's live total would
+  // disagree with what actually gets saved.
   function computeQuotationItemAmount(i: NewQuotationItemInput) {
     if (i.type === 'glass') {
-      const sft = Math.round(((i.lengthIn * i.widthIn) / 144) * i.qty * 100) / 100;
+      const len = roundUpTo6(i.lengthIn);
+      const wid = roundUpTo6(i.widthIn);
+      const sft = Math.round(((len * wid) / 144) * i.qty * 100) / 100;
       const workGlass = Math.round(sft * i.ratePerSft * 100) / 100;
-      const rft = Math.round(((2 * (i.lengthIn + i.widthIn)) / 12) * i.qty * 100) / 100;
+      const rft = Math.round(((2 * (len + wid)) / 12) * i.qty * 100) / 100;
       const polishAmt = Math.round(rft * (i.polishRate || 0) * 100) / 100;
       const fixingAmt = Math.round(sft * (i.fixingRatePerSft || 0) * 100) / 100;
       return { sft, workGlass, rft, polishAmt, fixingAmt, amount: workGlass + polishAmt + fixingAmt };
@@ -666,7 +833,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           item_type: 'glass',
           description: i.description,
           area: i.area || null,
-          slab: i.slab || null,
           sort_order: idx,
           thickness_mm: i.thicknessMm || null,
           length_in: i.lengthIn,
@@ -688,7 +854,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         item_type: 'simple',
         description: i.description,
         area: i.area || null,
-        slab: i.slab || null,
         sort_order: idx,
         quantity: i.quantity,
         rate: i.rate,
@@ -697,15 +862,56 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }
 
+  // Reloads a quotation's line items in the same shape QuotationModal's
+  // draft rows use, so editing a quotation actually starts from what's
+  // really saved instead of an empty form.
+  const fetchQuotationItems = useCallback(async (quotationDbId: string): Promise<NewQuotationItemInput[]> => {
+    const { data } = await supabase.from('quotation_items').select('*').eq('quotation_id', quotationDbId).order('sort_order');
+    return (data ?? []).map((it: any): NewQuotationItemInput =>
+      it.item_type === 'glass'
+        ? {
+            type: 'glass',
+            description: it.description,
+            area: it.area,
+            thicknessMm: it.thickness_mm,
+            lengthIn: Number(it.length_in),
+            widthIn: Number(it.width_in),
+            qty: Number(it.glass_qty),
+            ratePerSft: Number(it.rate_per_sft),
+            polishRate: Number(it.polish_rate ?? 0),
+            fixingRatePerSft: Number(it.fixing_rate_per_sft ?? 0),
+          }
+        : {
+            type: 'simple',
+            description: it.description,
+            area: it.area,
+            quantity: Number(it.quantity),
+            rate: Number(it.rate),
+          }
+    );
+  }, []);
+
   const addQuotation = async (input: NewQuotationInput): Promise<Quotation | null> => {
     const subtotal = input.items.reduce((sum, i) => sum + computeQuotationItemAmount(i).amount, 0);
     if (subtotal <= 0) return null;
-    const gst = gstEnabled ? Math.round(subtotal * 0.18 * 100) / 100 : 0;
+    const discountPercent = input.slab === 'D' ? input.discountPercent || 0 : SLAB_DISCOUNT_PERCENT[input.slab];
+    const discountAmount = Math.round(subtotal * (discountPercent / 100) * 100) / 100;
+    const taxableValue = subtotal - discountAmount;
+    const gst = gstEnabled ? Math.round(taxableValue * 0.18 * 100) / 100 : 0;
     const summary = input.items.slice(0, 3).map((i) => i.description).join(', ') || 'Quotation';
 
     const { data: qRow, error: qErr } = await supabase
       .from('quotations')
-      .insert({ customer_id: input.customerId, description: summary, amount: subtotal, gst, valid_until: input.validUntil })
+      .insert({
+        customer_id: input.customerId,
+        description: summary,
+        amount: subtotal,
+        slab: input.slab,
+        discount_percent: discountPercent,
+        discount_amount: discountAmount,
+        gst,
+        valid_until: input.validUntil,
+      })
       .select()
       .single();
     if (qErr || !qRow) return null;
@@ -725,12 +931,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const updateQuotation = async (quotationDbId: string, input: EditQuotationInput) => {
     const subtotal = input.items.reduce((sum, i) => sum + computeQuotationItemAmount(i).amount, 0);
     if (subtotal <= 0) return;
-    const gst = gstEnabled ? Math.round(subtotal * 0.18 * 100) / 100 : 0;
+    const discountPercent = input.slab === 'D' ? input.discountPercent || 0 : SLAB_DISCOUNT_PERCENT[input.slab];
+    const discountAmount = Math.round(subtotal * (discountPercent / 100) * 100) / 100;
+    const taxableValue = subtotal - discountAmount;
+    const gst = gstEnabled ? Math.round(taxableValue * 0.18 * 100) / 100 : 0;
     const summary = input.items.slice(0, 3).map((i) => i.description).join(', ') || 'Quotation';
 
     const { data: qRow, error: qErr } = await supabase
       .from('quotations')
-      .update({ description: summary, amount: subtotal, gst, valid_until: input.validUntil })
+      .update({
+        description: summary,
+        amount: subtotal,
+        slab: input.slab,
+        discount_percent: discountPercent,
+        discount_amount: discountAmount,
+        gst,
+        valid_until: input.validUntil,
+      })
       .eq('id', quotationDbId)
       .select()
       .single();
@@ -744,16 +961,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setQuotations((prev) => prev.map((q) => (q.dbId === quotationDbId ? updated : q)));
   };
 
-  const convertQuotationToInvoice = async (quotationDbId: string) => {
+  // slab/discountPercent here are whatever was last chosen in
+  // ConvertQuotationModal — defaulted to the quotation's own saved slab,
+  // but editable right at the point of conversion in case the price
+  // negotiated with the customer ended up different from what's saved.
+  // GST is recomputed fresh from the quotation's subtotal using THIS
+  // slab/discount, not copied from the quotation's stored gst.
+  const convertQuotationToInvoice = async (quotationDbId: string, slab: InvoiceSlab, discountPercent: number) => {
     const { data: qRow, error: qErr } = await supabase.from('quotations').select('*').eq('id', quotationDbId).eq('status', 'pending').single();
     if (qErr || !qRow) return;
 
     const { data: qItems, error: itemsErr } = await supabase.from('quotation_items').select('*').eq('quotation_id', quotationDbId).order('sort_order');
     if (itemsErr) return;
 
+    const subtotal = Number(qRow.amount);
+    const resolvedDiscountPercent = slab === 'D' ? discountPercent || 0 : SLAB_DISCOUNT_PERCENT[slab];
+    const discountAmount = Math.round(subtotal * (resolvedDiscountPercent / 100) * 100) / 100;
+    const taxableValue = subtotal - discountAmount;
+    const gst = gstEnabled ? Math.round(taxableValue * 0.18 * 100) / 100 : 0;
+
     const { data: invRow, error: invErr } = await supabase
       .from('invoices')
-      .insert({ customer_id: qRow.customer_id, kind: 'job', description: qRow.description, amount: qRow.amount, gst: qRow.gst, work_status: 'in_progress' })
+      .insert({
+        customer_id: qRow.customer_id,
+        kind: 'job',
+        description: qRow.description,
+        amount: subtotal,
+        slab,
+        discount_percent: resolvedDiscountPercent,
+        discount_amount: discountAmount,
+        gst,
+        work_status: 'in_progress',
+      })
       .select()
       .single();
     if (invErr || !invRow) return;
@@ -764,7 +1003,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             invoice_id: invRow.id,
             item_type: 'glass',
             description: it.description,
-            slab: it.slab,
             sort_order: it.sort_order,
             thickness_mm: it.thickness_mm,
             length_in: it.length_in,
@@ -784,7 +1022,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             invoice_id: invRow.id,
             item_type: 'simple',
             description: it.description,
-            slab: it.slab,
             sort_order: it.sort_order,
             quantity: it.quantity,
             rate: it.rate,
@@ -844,6 +1081,45 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setLinks((prev) => [...prev, mapImportantLink(data)]);
   };
 
+  // ---------- Price List ----------
+  const addPriceListItem = async (input: NewPriceListItemInput) => {
+    const { data, error } = await supabase
+      .from('price_list')
+      .insert({
+        description: input.description,
+        rate_per_sft: input.ratePerSft,
+        polish_rate: input.polishRate,
+        fixing_rate: input.fixingRate,
+        sort_order: priceList.length,
+      })
+      .select()
+      .single();
+    if (error || !data) return;
+    setPriceList((prev) => [...prev, mapPriceListItem(data)]);
+  };
+
+  const updatePriceListItem = async (id: string, input: NewPriceListItemInput) => {
+    const { data, error } = await supabase
+      .from('price_list')
+      .update({
+        description: input.description,
+        rate_per_sft: input.ratePerSft,
+        polish_rate: input.polishRate,
+        fixing_rate: input.fixingRate,
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error || !data) return;
+    setPriceList((prev) => prev.map((p) => (p.id === id ? mapPriceListItem(data) : p)));
+  };
+
+  const deletePriceListItem = async (id: string) => {
+    const { error } = await supabase.from('price_list').delete().eq('id', id);
+    if (error) return;
+    setPriceList((prev) => prev.filter((p) => p.id !== id));
+  };
+
   const value = useMemo<AppContextValue>(
     () => ({
       gstEnabled,
@@ -857,6 +1133,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       vendorPurchases,
       addVendorPurchase,
       recordVendorPayment,
+      vendorSlips,
+      addVendorSlip,
+      priceVendorSlip,
       monthlyFigures,
       dashboardSummary,
       invoices,
@@ -866,12 +1145,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       quotations,
       addQuotation,
       updateQuotation,
+      fetchQuotationItems,
       convertQuotationToInvoice,
       workers,
       addWorker,
       logWorkerAdvance,
       links,
       addLink,
+      priceList,
+      addPriceListItem,
+      updatePriceListItem,
+      deletePriceListItem,
       isInvoiceModalOpen,
       invoiceModalCustomerId,
       openInvoiceModal: (customerId?: string) => {
@@ -925,6 +1209,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setPaymentModalOpen(true);
       },
       closePaymentModal: () => setPaymentModalOpen(false),
+      isConvertQuotationModalOpen,
+      convertQuotationModalId,
+      openConvertQuotationModal: (quotationDbId: string) => {
+        setConvertQuotationModalId(quotationDbId);
+        setConvertQuotationModalOpen(true);
+      },
+      closeConvertQuotationModal: () => setConvertQuotationModalOpen(false),
       printTarget,
       openPrint: (kind, id) => setPrintTarget({ kind, id }),
       closePrint: () => setPrintTarget(null),
@@ -943,12 +1234,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       vendors,
       expenses,
       vendorPurchases,
+      vendorSlips,
       invoices,
       quotations,
       monthlyFigures,
       dashboardSummary,
       workers,
       links,
+      priceList,
       isInvoiceModalOpen,
       invoiceModalCustomerId,
       isCustomerModalOpen,
@@ -963,6 +1256,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       isLinkModalOpen,
       isPaymentModalOpen,
       paymentModalInvoiceDbId,
+      isConvertQuotationModalOpen,
+      convertQuotationModalId,
       printTarget,
       paymentReceipt,
       authLoading,
