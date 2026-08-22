@@ -10,4 +10,12 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    // Don't persist the session to localStorage — every fresh open of the
+    // app (new tab, browser restart, etc.) should land on /login rather
+    // than silently restoring a previous login. Session still works
+    // normally for as long as this tab/page stays open.
+    persistSession: false,
+  },
+});

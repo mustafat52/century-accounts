@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import Topbar from '../components/Topbar';
 import StatCard from '../components/StatCard';
 import StatusBadge from '../components/StatusBadge';
@@ -29,6 +29,17 @@ export default function Dashboard() {
 
   const recent = [...invoices].slice(0, 5);
   const customerName = (id: string) => customers.find((c) => c.id === id)?.name ?? '—';
+
+  const revenueVsExpensePie = useMemo(() => {
+    const last6 = monthlyFigures.slice(-6);
+    const revenue = last6.reduce((sum, m) => sum + m.revenue, 0);
+    const expenses = last6.reduce((sum, m) => sum + m.expenses, 0);
+    return [
+      { name: 'Revenue', value: revenue, color: '#c9a24b' },
+      { name: 'Expenses', value: expenses, color: '#b5524a' },
+    ];
+  }, [monthlyFigures]);
+  const hasPieData = revenueVsExpensePie.some((d) => d.value > 0);
 
   return (
     <>
@@ -72,19 +83,35 @@ export default function Dashboard() {
               <h3>Revenue vs Expenses — last 6 months</h3>
             </div>
             <div style={{ padding: '20px 20px 8px', height: 260 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={monthlyFigures}>
-                  <CartesianGrid stroke="#313644" strokeDasharray="3 3" />
-                  <XAxis dataKey="month" stroke="#948f84" fontSize={12} />
-                  <YAxis stroke="#948f84" fontSize={12} tickFormatter={(v) => `${v / 1000}k`} />
-                  <Tooltip
-                    contentStyle={{ background: '#1c1f27', border: '1px solid #313644', fontSize: 12 }}
-                    formatter={(v: number) => formatINR(v)}
-                  />
-                  <Line type="monotone" dataKey="revenue" stroke="#c9a24b" strokeWidth={2} dot={false} name="Revenue" />
-                  <Line type="monotone" dataKey="expenses" stroke="#b5524a" strokeWidth={2} dot={false} name="Expenses" />
-                </LineChart>
-              </ResponsiveContainer>
+              {hasPieData ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={revenueVsExpensePie}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={85}
+                      label={(entry) => `${entry.name}: ${formatINR(entry.value)}`}
+                      labelLine={{ stroke: '#948f84' }}
+                    >
+                      {revenueVsExpensePie.map((d) => (
+                        <Cell key={d.name} fill={d.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ background: '#1c1f27', border: '1px solid #313644', fontSize: 12 }}
+                      formatter={(v: number) => formatINR(v)}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="row-sub" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+                  No revenue or expenses recorded in the last 6 months yet.
+                </div>
+              )}
             </div>
           </div>
 
