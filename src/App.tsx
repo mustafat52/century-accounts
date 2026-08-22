@@ -12,6 +12,7 @@ import Invoicing from './pages/Invoicing';
 import PriceList from './pages/PriceList';
 import Customers from './pages/Customers';
 import Vendors from './pages/Vendors';
+import PurchaseBills from './pages/PurchaseBills';
 import Expenses from './pages/Expenses';
 import Reports from './pages/Reports';
 import Links from './pages/Links';
@@ -45,6 +46,7 @@ function ProtectedShell() {
             <Route path="/price-list" element={<PriceList />} />
             <Route path="/customers" element={<Customers />} />
             <Route path="/vendors" element={<Vendors />} />
+            <Route path="/purchase-bills" element={<PurchaseBills />} />
             <Route path="/expenses" element={<Expenses />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/links" element={<Links />} />

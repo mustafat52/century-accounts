@@ -144,6 +144,46 @@ export interface VendorSlip {
   items: VendorSlipItem[];
 }
 
+// ---- Purchase bills (GST purchase register) ----
+// A pure compliance record of tax invoices RECEIVED from suppliers —
+// unlike VendorSlip/expenses, this never touches payable/payments. It just
+// captures what a GST return needs, exactly as printed on the bill.
+// Deliberately NOT linked to vendors — suppliers and vendors are treated
+// as separate concepts by the client, and there's no confirmed Suppliers
+// tab yet.
+export type PurchaseBillTaxType = 'cgst_sgst' | 'igst';
+
+export interface PurchaseBillItem {
+  id: string;
+  hsnCode: string | null;
+  description: string;
+  quantity: number;
+  rate: number;
+  taxableAmount: number;
+  gstRate: number; // 5 / 12 / 18 / 28
+  cgstAmount: number;
+  sgstAmount: number;
+  igstAmount: number;
+  sortOrder: number;
+}
+
+export interface PurchaseBill {
+  id: string; // real Supabase UUID
+  supplierGstin: string;
+  supplierName: string;
+  supplierAddress: string | null;
+  invoiceNo: string;
+  invoiceDate: string;
+  placeOfSupply: string;
+  taxType: PurchaseBillTaxType;
+  subtotal: number;
+  cgstTotal: number;
+  sgstTotal: number;
+  igstTotal: number;
+  totalAmount: number;
+  items: PurchaseBillItem[];
+}
+
 
 export interface MonthlyFigure {
   month: string;

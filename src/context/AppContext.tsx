@@ -19,6 +19,9 @@ import type {
   VendorSlip,
   VendorSlipItem,
   CareOf,
+  PurchaseBill,
+  PurchaseBillItem,
+  PurchaseBillTaxType,
 } from '../types';
 import { SLAB_DISCOUNT_PERCENT } from '../types';
 import { supabase } from '../lib/supabaseClient';
@@ -37,6 +40,8 @@ import {
   mapPriceListItem,
   mapVendorSlip,
   mapVendorSlipItem,
+  mapPurchaseBill,
+  mapPurchaseBillItem,
 } from '../lib/mappers';
 
 export type NewInvoiceItemInput =
@@ -129,6 +134,25 @@ interface NewVendorSlipInput {
   items: NewVendorSlipItemInput[];
 }
 
+interface NewPurchaseBillItemInput {
+  hsnCode: string;
+  description: string;
+  quantity: number;
+  rate: number;
+  gstRate: number; // 5 / 12 / 18 / 28
+}
+
+interface NewPurchaseBillInput {
+  supplierGstin: string;
+  supplierName: string;
+  supplierAddress: string;
+  invoiceNo: string;
+  invoiceDate: string;
+  placeOfSupply: string;
+  taxType: PurchaseBillTaxType;
+  items: NewPurchaseBillItemInput[];
+}
+
 interface NewQuotationInput {
   customerId: string;
   validUntil: string;
@@ -198,6 +222,9 @@ interface AppContextValue {
   vendorSlips: VendorSlip[];
   addVendorSlip: (input: NewVendorSlipInput) => Promise<VendorSlip | null>;
   priceVendorSlip: (slipId: string, itemRates: { itemId: string; rate: number }[]) => Promise<void>;
+
+  purchaseBills: PurchaseBill[];
+  addPurchaseBill: (input: NewPurchaseBillInput) => Promise<PurchaseBill | null>;
 
   monthlyFigures: MonthlyFigure[];
   dashboardSummary: DashboardSummary;
@@ -298,6 +325,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [vendorPurchases, setVendorPurchases] = useState<VendorPurchase[]>([]);
   const [vendorSlips, setVendorSlips] = useState<VendorSlip[]>([]);
+  const [purchaseBills, setPurchaseBills] = useState<PurchaseBill[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [monthlyFigures, setMonthlyFigures] = useState<MonthlyFigure[]>([]);
@@ -416,6 +444,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       priceListRes,
       vendorSlipsRes,
       vendorSlipItemsRes,
+      purchaseBillsRes,
+      purchaseBillItemsRes,
     ] = await Promise.all([
       supabase.from('business_settings').select('*').single(),
       supabase.from('customer_balances').select('*').order('name'),
@@ -432,6 +462,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       supabase.from('price_list').select('*').order('sort_order'),
       supabase.from('vendor_slips').select('*').order('created_at', { ascending: false }),
       supabase.from('vendor_slip_items').select('*').order('sort_order'),
+      supabase.from('purchase_bills').select('*').order('invoice_date', { ascending: false }),
+      supabase.from('purchase_bill_items').select('*').order('sort_order'),
     ]);
 
     if (settingsRes.data) setGstEnabled(settingsRes.data.gst_enabled);
@@ -465,6 +497,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         itemsBySlip.set(row.slip_id, list);
       });
       setVendorSlips(vendorSlipsRes.data.map((row: any) => mapVendorSlip(row, itemsBySlip.get(row.id) ?? [])));
+    }
+
+    if (purchaseBillsRes.data) {
+      const itemsByBill = new Map<string, PurchaseBillItem[]>();
+      (purchaseBillItemsRes.data ?? []).forEach((row: any) => {
+        const list = itemsByBill.get(row.bill_id) ?? [];
+        list.push(mapPurchaseBillItem(row));
+        itemsByBill.set(row.bill_id, list);
+      });
+      setPurchaseBills(purchaseBillsRes.data.map((row: any) => mapPurchaseBill(row, itemsByBill.get(row.id) ?? [])));
     }
 
     setDataLoading(false);
@@ -550,7 +592,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       .select()
       .single();
     if (error || !data) return null;
-    const newVendor: Vendor = { id: data.id, name: data.name, category: data.category, contact: data.contact, totalPurchased: 0, payable: 0 };
+    const newVendor: Vendor = {
+      id: data.id,
+      name: data.name,
+      category: data.category,
+      contact: data.contact,
+      totalPurchased: 0,
+      payable: 0,
+    };
     setVendors((prev) => [newVendor, ...prev]);
     return newVendor;
   };
@@ -669,6 +718,79 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
     if (error) return;
     await Promise.all([refreshVendorSlips(), refreshVendorPurchases(), refreshVendors()]);
+  };
+
+  // ---------- Purchase bills (GST purchase register) ----------
+  // Pure compliance log — a standalone record of a supplier's tax invoice,
+  // never touches payable/payments. Deliberately NOT linked to vendors —
+  // suppliers and vendors are treated as separate concepts by the client,
+  // and there's no confirmed Suppliers tab yet.
+  const addPurchaseBill = async (input: NewPurchaseBillInput): Promise<PurchaseBill | null> => {
+    if (input.items.length === 0) return null;
+
+    const computedItems = input.items.map((it) => {
+      const taxable = Math.round(it.quantity * it.rate * 100) / 100;
+      const gstAmount = Math.round(taxable * (it.gstRate / 100) * 100) / 100;
+      const cgst = input.taxType === 'cgst_sgst' ? Math.round((gstAmount / 2) * 100) / 100 : 0;
+      const sgst = input.taxType === 'cgst_sgst' ? Math.round((gstAmount - cgst) * 100) / 100 : 0;
+      const igst = input.taxType === 'igst' ? gstAmount : 0;
+      return { ...it, taxable, cgst, sgst, igst };
+    });
+
+    const subtotal = Math.round(computedItems.reduce((s, i) => s + i.taxable, 0) * 100) / 100;
+    const cgstTotal = Math.round(computedItems.reduce((s, i) => s + i.cgst, 0) * 100) / 100;
+    const sgstTotal = Math.round(computedItems.reduce((s, i) => s + i.sgst, 0) * 100) / 100;
+    const igstTotal = Math.round(computedItems.reduce((s, i) => s + i.igst, 0) * 100) / 100;
+    const totalAmount = Math.round((subtotal + cgstTotal + sgstTotal + igstTotal) * 100) / 100;
+
+    const { data: billRow, error: billErr } = await supabase
+      .from('purchase_bills')
+      .insert({
+        supplier_gstin: input.supplierGstin.trim().toUpperCase(),
+        supplier_name: input.supplierName,
+        supplier_address: input.supplierAddress || null,
+        invoice_no: input.invoiceNo,
+        invoice_date: input.invoiceDate,
+        place_of_supply: input.placeOfSupply,
+        tax_type: input.taxType,
+        subtotal,
+        cgst_total: cgstTotal,
+        sgst_total: sgstTotal,
+        igst_total: igstTotal,
+        total_amount: totalAmount,
+      })
+      .select()
+      .single();
+    if (billErr || !billRow) return null;
+
+    const itemRows = computedItems.map((it, idx) => ({
+      bill_id: billRow.id,
+      hsn_code: it.hsnCode || null,
+      description: it.description,
+      quantity: it.quantity,
+      rate: it.rate,
+      taxable_amount: it.taxable,
+      gst_rate: it.gstRate,
+      cgst_amount: it.cgst,
+      sgst_amount: it.sgst,
+      igst_amount: it.igst,
+      sort_order: idx,
+    }));
+
+    const { error: itemsErr } = await supabase.from('purchase_bill_items').insert(itemRows);
+    if (itemsErr) {
+      await supabase.from('purchase_bills').delete().eq('id', billRow.id);
+      return null;
+    }
+
+    const { data: itemsData } = await supabase
+      .from('purchase_bill_items')
+      .select('*')
+      .eq('bill_id', billRow.id)
+      .order('sort_order');
+    const newBill = mapPurchaseBill(billRow, (itemsData ?? []).map(mapPurchaseBillItem));
+    setPurchaseBills((prev) => [newBill, ...prev]);
+    return newBill;
   };
 
   // Glass is billed in 6-inch increments — any entered length/width rounds
@@ -1136,6 +1258,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       vendorSlips,
       addVendorSlip,
       priceVendorSlip,
+      purchaseBills,
+      addPurchaseBill,
       monthlyFigures,
       dashboardSummary,
       invoices,
@@ -1235,6 +1359,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       expenses,
       vendorPurchases,
       vendorSlips,
+      purchaseBills,
       invoices,
       quotations,
       monthlyFigures,

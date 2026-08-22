@@ -14,6 +14,8 @@ import type {
   PriceListItem,
   VendorSlip,
   VendorSlipItem,
+  PurchaseBill,
+  PurchaseBillItem,
 } from '../types';
 
 // These mirror the Supabase table/view column names (snake_case).
@@ -209,6 +211,42 @@ export function mapVendorSlip(row: any, items: VendorSlipItem[] = []): VendorSli
     slipDate: row.slip_date,
     pricedAt: row.priced_at ?? null,
     expenseId: row.expense_id ?? null,
+    items,
+  };
+}
+
+export function mapPurchaseBillItem(row: any): PurchaseBillItem {
+  return {
+    id: row.id,
+    hsnCode: row.hsn_code ?? null,
+    description: row.description,
+    quantity: Number(row.quantity),
+    rate: Number(row.rate),
+    taxableAmount: Number(row.taxable_amount),
+    gstRate: Number(row.gst_rate),
+    cgstAmount: Number(row.cgst_amount),
+    sgstAmount: Number(row.sgst_amount),
+    igstAmount: Number(row.igst_amount),
+    sortOrder: Number(row.sort_order ?? 0),
+  };
+}
+
+// `items` must be pre-grouped by bill_id and passed in (see AppContext).
+export function mapPurchaseBill(row: any, items: PurchaseBillItem[] = []): PurchaseBill {
+  return {
+    id: row.id,
+    supplierGstin: row.supplier_gstin,
+    supplierName: row.supplier_name,
+    supplierAddress: row.supplier_address ?? null,
+    invoiceNo: row.invoice_no,
+    invoiceDate: row.invoice_date,
+    placeOfSupply: row.place_of_supply,
+    taxType: row.tax_type,
+    subtotal: Number(row.subtotal),
+    cgstTotal: Number(row.cgst_total),
+    sgstTotal: Number(row.sgst_total),
+    igstTotal: Number(row.igst_total),
+    totalAmount: Number(row.total_amount),
     items,
   };
 }

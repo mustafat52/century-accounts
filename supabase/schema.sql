@@ -310,6 +310,50 @@ create table vendor_slip_items (
 );
 create index vendor_slip_items_slip_id_idx on vendor_slip_items (slip_id);
 
+create type purchase_bill_tax_type as enum ('cgst_sgst', 'igst');
+
+-- ---------- Purchase bills (GST purchase register) ----------
+-- A pure compliance record of tax invoices RECEIVED from suppliers — unlike
+-- vendor_slips/expenses, this never touches payable/payments. It exists so
+-- the fields a GST return needs (GSTIN, HSN, taxable value, CGST/SGST/IGST
+-- split) are captured exactly as printed on the physical bill.
+-- Deliberately NOT linked to vendors — suppliers and vendors are treated
+-- as separate concepts by the client, and there's no confirmed Suppliers
+-- tab yet, so this stays a fully standalone record.
+create table purchase_bills (
+  id uuid primary key default gen_random_uuid(),
+  supplier_gstin text not null,
+  supplier_name text not null,
+  supplier_address text,
+  invoice_no text not null,
+  invoice_date date not null,
+  place_of_supply text not null,
+  tax_type purchase_bill_tax_type not null default 'cgst_sgst',
+  subtotal numeric(12, 2) not null default 0,
+  cgst_total numeric(12, 2) not null default 0,
+  sgst_total numeric(12, 2) not null default 0,
+  igst_total numeric(12, 2) not null default 0,
+  total_amount numeric(12, 2) not null default 0,
+  created_at timestamptz not null default now()
+);
+create index purchase_bills_supplier_gstin_idx on purchase_bills (supplier_gstin);
+
+create table purchase_bill_items (
+  id uuid primary key default gen_random_uuid(),
+  bill_id uuid not null references purchase_bills (id) on delete cascade,
+  hsn_code text,
+  description text not null,
+  quantity numeric(10, 2) not null check (quantity > 0),
+  rate numeric(12, 2) not null check (rate >= 0),
+  taxable_amount numeric(12, 2) not null default 0,
+  gst_rate numeric(5, 2) not null default 18,
+  cgst_amount numeric(12, 2) not null default 0,
+  sgst_amount numeric(12, 2) not null default 0,
+  igst_amount numeric(12, 2) not null default 0,
+  sort_order int not null default 0
+);
+create index purchase_bill_items_bill_id_idx on purchase_bill_items (bill_id);
+
 -- ============================================================
 -- Functions
 --
@@ -1113,6 +1157,8 @@ alter table important_links enable row level security;
 alter table price_list enable row level security;
 alter table vendor_slips enable row level security;
 alter table vendor_slip_items enable row level security;
+alter table purchase_bills enable row level security;
+alter table purchase_bill_items enable row level security;
 
 create policy "profiles readable by signed-in users" on profiles
   for select using (auth.role() = 'authenticated');
@@ -1163,6 +1209,12 @@ create policy "vendor_slips full access" on vendor_slips
   for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
 create policy "vendor_slip_items full access" on vendor_slip_items
+  for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+create policy "purchase_bills full access" on purchase_bills
+  for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+create policy "purchase_bill_items full access" on purchase_bill_items
   for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
 -- Views were created with security_invoker = true, so they respect the RLS

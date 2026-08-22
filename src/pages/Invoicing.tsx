@@ -57,7 +57,7 @@ export default function Invoicing() {
 
   return (
     <>
-      <Topbar title="Invoicing" subtitle="Quick sales, job-order invoices, and quotations — in one place" />
+      <Topbar title="Invoicing" subtitle="Quick sales, job-order invoices, and quotations — in one place" showInvoiceActions />
       <div className="view-body">
         <div className="chip-row">
           <button className={`chip${tab === 'invoices' ? ' is-active' : ''}`} onClick={() => setTab('invoices')}>
