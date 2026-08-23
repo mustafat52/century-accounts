@@ -296,6 +296,13 @@ tbody tr:hover { background: var(--surface-2); }
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+/* Wrap any wide data table in this so it scrolls sideways on narrow
+   screens instead of getting hard-clipped by .panel's overflow: hidden. */
+.table-scroll {
+  overflow-x: auto;
 }
 
 .badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; }
@@ -338,6 +345,12 @@ tbody tr:hover { background: var(--surface-2); }
 
 .modal.modal-wide {
   width: 960px;
+}
+
+/* For data-heavy read-only detail views (e.g. a customer's full purchase
+   history) that need more room than a form ever does. */
+.modal.modal-xl {
+  width: 1100px;
 }
 
 .modal-head {
@@ -713,12 +726,22 @@ tbody tr:hover { background: var(--surface-2); }
 .receipt-page {
   width: 780px;
   max-width: 100%;
+  /* Matches an A4 page's proportions at this width — combined with the
+     flex column + .receipt-bottom's margin-top: auto below, this is what
+     pins Bank Details/Terms/signature to the bottom of the page on short
+     bills, instead of them bunching up right under the totals with a big
+     empty gap beneath. On a bill long enough to already fill the page,
+     this has no effect — content just flows naturally. */
+  min-height: 297mm;
   background: #ffffff;
   color: #1a1a1a;
   border-radius: 3px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
-  padding: 32px 40px;
+  padding: 28px 34px;
   font-family: var(--font-body);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
 }
 
 .receipt-head {
@@ -737,12 +760,12 @@ tbody tr:hover { background: var(--surface-2); }
 
 .receipt-meta {
   text-align: right;
-  font-size: 13px;
+  font-size: 12px;
   color: #555;
 }
 
 .receipt-section-label {
-  font-size: 11px;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: #888;
@@ -751,20 +774,20 @@ tbody tr:hover { background: var(--surface-2); }
 
 .receipt-two-col {
   display: grid;
-  grid-template-columns: 1fr 1.4fr;
-  gap: 28px;
-  margin-top: 20px;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 24px;
 }
 
 .receipt-table {
   width: 100%;
   border-collapse: collapse;
-  margin: 8px 0 20px;
+  margin: 8px 0 18px;
+  font-size: 11px;
 }
 
 .receipt-table th {
   text-align: left;
-  font-size: 11px;
+  font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: #888;
@@ -773,15 +796,15 @@ tbody tr:hover { background: var(--surface-2); }
 }
 
 .receipt-table td {
-  padding: 7px 6px;
+  padding: 6px 6px;
   border-bottom: 1px solid #eee;
-  font-size: 13px;
+  font-size: 11px;
 }
 
 .receipt-totals {
   margin-left: auto;
-  width: 280px;
-  font-size: 14px;
+  width: 260px;
+  font-size: 12px;
   border-top: 1px solid #ddd;
   padding-top: 8px;
 }
@@ -790,7 +813,7 @@ tbody tr:hover { background: var(--surface-2); }
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  padding: 5px 0;
+  padding: 4px 0;
   color: #333;
 }
 .receipt-totals-row span:last-child {
@@ -801,10 +824,18 @@ tbody tr:hover { background: var(--surface-2); }
 .receipt-totals-row.grand {
   border-top: 2px solid #1a1a1a;
   font-weight: 700;
-  font-size: 16px;
+  font-size: 14px;
   margin-top: 6px;
   padding-top: 8px;
   color: #1a1a1a;
+}
+
+/* Bank Details + Terms & Conditions + signature block — pushed to the
+   bottom of the (min-height: 297mm) page via margin-top: auto, since
+   .receipt-page is a flex column. */
+.receipt-bottom {
+  margin-top: auto;
+  padding-top: 20px;
 }
 
 .receipt-footer {
@@ -812,7 +843,7 @@ tbody tr:hover { background: var(--surface-2); }
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  font-size: 11px;
+  font-size: 10px;
   color: #777;
   gap: 20px;
 }
@@ -841,9 +872,10 @@ tbody tr:hover { background: var(--surface-2); }
     top: 0;
     left: 0;
     width: 100%;
+    min-height: calc(297mm - 16mm);
     box-shadow: none;
     margin: 0;
-    padding: 12px 20px;
+    padding: 10px 16px;
   }
   .no-print { display: none !important; }
   .receipt-overlay { position: static; background: none; padding: 0; overflow: visible; }
