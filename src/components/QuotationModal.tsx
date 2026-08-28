@@ -344,7 +344,7 @@ export default function QuotationModal() {
 
                 <div className="item-fields">
                   <div className="form-field">
-                    <label>Area / Location</label>
+                    <label>Area</label>
                     <input
                       type="text"
                       value={item.area}
@@ -353,7 +353,7 @@ export default function QuotationModal() {
                     />
                   </div>
                   <div className="form-field span-2">
-                    <label>Description</label>
+                    <label>Description of Goods</label>
                     <input
                       type="text"
                       list="price-list-options"

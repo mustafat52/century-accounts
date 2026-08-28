@@ -1,10 +1,39 @@
+import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatINR } from '../utils/format';
+import type { QuotationItem } from '../types';
 import logoLight from '../assets/logo-light.png';
 
 export default function PrintableDocument() {
-  const { printTarget, closePrint, invoices, quotations, customers, vendors, vendorSlips, openConvertQuotationModal } =
-    useApp();
+  const {
+    printTarget,
+    closePrint,
+    invoices,
+    quotations,
+    customers,
+    vendors,
+    vendorSlips,
+    openConvertQuotationModal,
+    fetchQuotationItemsForPrint,
+  } = useApp();
+
+  // Quotations don't carry their items in app state (unlike invoices,
+  // which are preloaded) — so printing one means fetching its real,
+  // fully-computed line items on demand here, instead of falling back to
+  // one collapsed summary row like this used to.
+  const [quotationItems, setQuotationItems] = useState<QuotationItem[]>([]);
+
+  useEffect(() => {
+    if (printTarget?.kind === 'quotation') {
+      const q = quotations.find((qq) => qq.id === printTarget.id);
+      if (q) {
+        fetchQuotationItemsForPrint(q.dbId).then(setQuotationItems);
+        return;
+      }
+    }
+    setQuotationItems([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [printTarget?.kind, printTarget?.id]);
 
   if (!printTarget) return null;
 
@@ -102,10 +131,15 @@ export default function PrintableDocument() {
   const cgst = doc.gst / 2;
   const sgst = doc.gst / 2;
 
-  const glassItems = invoice ? invoice.items.filter((it) => it.itemType === 'glass') : [];
-  const hardwareItems = invoice ? invoice.items.filter((it) => it.itemType === 'simple') : [];
-  const fallbackItem = !invoice
-    ? [{ id: 'summary', description: doc.description, quantity: 1, rate: doc.amount, amount: doc.amount }]
+  const glassItems = invoice
+    ? invoice.items.filter((it) => it.itemType === 'glass')
+    : quotation
+    ? quotationItems.filter((it) => it.itemType === 'glass')
+    : [];
+  const hardwareItems = invoice
+    ? invoice.items.filter((it) => it.itemType === 'simple')
+    : quotation
+    ? quotationItems.filter((it) => it.itemType === 'simple')
     : [];
 
   return (
@@ -170,13 +204,14 @@ export default function PrintableDocument() {
             <table className="receipt-table">
               <thead>
                 <tr>
-                  <th>Description</th>
+                  <th>Area</th>
+                  <th>Description of Goods</th>
                   <th style={{ textAlign: 'center' }}>Size (in)</th>
                   <th style={{ textAlign: 'center' }}>Qty</th>
                   <th style={{ textAlign: 'right' }}>Sft</th>
                   <th style={{ textAlign: 'right' }}>Rate/Sft</th>
-                  <th style={{ textAlign: 'right' }}>Polish</th>
                   <th style={{ textAlign: 'right' }}>Rft</th>
+                  <th style={{ textAlign: 'right' }}>Polish</th>
                   <th style={{ textAlign: 'right' }}>Fixing</th>
                   <th style={{ textAlign: 'right' }}>Amount</th>
                 </tr>
@@ -184,13 +219,14 @@ export default function PrintableDocument() {
               <tbody>
                 {glassItems.map((item) => (
                   <tr key={item.id}>
+                    <td>{item.area || '—'}</td>
                     <td>{item.description}</td>
                     <td style={{ textAlign: 'center' }}>{item.lengthIn} x {item.widthIn}</td>
                     <td style={{ textAlign: 'center' }}>{item.glassQty}</td>
                     <td style={{ textAlign: 'right' }}>{item.sft?.toFixed(2)}</td>
                     <td style={{ textAlign: 'right' }}>{formatINR(item.ratePerSft ?? 0)}</td>
-                    <td style={{ textAlign: 'right' }}>{formatINR(item.polishAmount ?? 0)}</td>
                     <td style={{ textAlign: 'right' }}>{item.rft?.toFixed(2)}</td>
+                    <td style={{ textAlign: 'right' }}>{formatINR(item.polishAmount ?? 0)}</td>
                     <td style={{ textAlign: 'right' }}>{formatINR(item.fixingAmount ?? 0)}</td>
                     <td style={{ textAlign: 'right' }}>{formatINR(item.amount)}</td>
                   </tr>
@@ -200,21 +236,23 @@ export default function PrintableDocument() {
           </>
         )}
 
-        {(hardwareItems.length > 0 || fallbackItem.length > 0) && (
+        {hardwareItems.length > 0 && (
           <>
             <div className="receipt-section-label">{glassItems.length > 0 ? 'Architectural Hardware' : 'Items'}</div>
             <table className="receipt-table">
               <thead>
                 <tr>
-                  <th>Description</th>
+                  <th>Area</th>
+                  <th>Description of Goods</th>
                   <th style={{ textAlign: 'center' }}>Qty</th>
                   <th style={{ textAlign: 'right' }}>Rate</th>
                   <th style={{ textAlign: 'right' }}>Amount</th>
                 </tr>
               </thead>
               <tbody>
-                {(hardwareItems.length > 0 ? hardwareItems : fallbackItem).map((item) => (
+                {hardwareItems.map((item) => (
                   <tr key={item.id}>
+                    <td>{item.area || '—'}</td>
                     <td>{item.description}</td>
                     <td style={{ textAlign: 'center' }}>{item.quantity}</td>
                     <td style={{ textAlign: 'right' }}>{formatINR(item.rate ?? 0)}</td>

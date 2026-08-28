@@ -102,6 +102,7 @@ create table invoice_items (
   invoice_id uuid not null references invoices (id) on delete cascade,
   item_type text not null check (item_type in ('glass', 'simple')),
   description text not null,
+  area text,
   sort_order int not null default 0,
   thickness_mm text,
 

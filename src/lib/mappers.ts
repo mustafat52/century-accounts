@@ -51,6 +51,7 @@ export function mapInvoiceItem(row: any): InvoiceItem {
     id: row.id,
     itemType: row.item_type,
     description: row.description,
+    area: row.area ?? null,
     thicknessMm: row.thickness_mm ?? null,
     sortOrder: Number(row.sort_order ?? 0),
     amount: Number(row.amount),
@@ -69,6 +70,11 @@ export function mapInvoiceItem(row: any): InvoiceItem {
     fixingAmount: numOrNull(row.fixing_amount),
   };
 }
+
+// quotation_items has the identical column layout to invoice_items, so the
+// same mapping applies — used when printing a quotation's real itemized
+// rows (see fetchQuotationItemsForPrint in AppContext).
+export const mapQuotationItem = mapInvoiceItem;
 
 // `items` must be pre-grouped by invoice_id and passed in (see AppContext).
 export function mapInvoice(row: any, items: InvoiceItem[] = []): Invoice {

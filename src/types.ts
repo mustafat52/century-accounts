@@ -36,6 +36,7 @@ export interface InvoiceItem {
   id: string;
   itemType: InvoiceItemType;
   description: string;
+  area: string | null;
   thicknessMm: string | null;
   sortOrder: number;
   amount: number; // final line total, either kind
@@ -57,6 +58,12 @@ export interface InvoiceItem {
   fixingRatePerSft: number | null;
   fixingAmount: number | null;
 }
+
+// Same shape as InvoiceItem — used when printing a quotation's real
+// itemized rows (see fetchQuotationItemsForPrint in AppContext), as
+// opposed to NewQuotationItemInput which is the editable draft shape used
+// by QuotationModal and has no computed sft/rft/amount fields.
+export type QuotationItem = InvoiceItem;
 
 export interface Invoice {
   id: string; // human-readable, e.g. "INV-1043"

@@ -22,6 +22,7 @@ import type {
   PurchaseBill,
   PurchaseBillItem,
   PurchaseBillTaxType,
+  QuotationItem,
 } from '../types';
 import { SLAB_DISCOUNT_PERCENT } from '../types';
 import { supabase } from '../lib/supabaseClient';
@@ -42,18 +43,21 @@ import {
   mapVendorSlipItem,
   mapPurchaseBill,
   mapPurchaseBillItem,
+  mapQuotationItem,
 } from '../lib/mappers';
 
 export type NewInvoiceItemInput =
   | {
       type: 'simple';
       description: string;
+      area?: string | null;
       quantity: number;
       rate: number;
     }
   | {
       type: 'glass';
       description: string;
+      area?: string | null;
       thicknessMm?: string | null;
       lengthIn: number;
       widthIn: number;
@@ -238,6 +242,7 @@ interface AppContextValue {
   addQuotation: (input: NewQuotationInput) => Promise<Quotation | null>;
   updateQuotation: (quotationDbId: string, input: EditQuotationInput) => Promise<void>;
   fetchQuotationItems: (quotationDbId: string) => Promise<NewQuotationItemInput[]>;
+  fetchQuotationItemsForPrint: (quotationDbId: string) => Promise<QuotationItem[]>;
   convertQuotationToInvoice: (quotationDbId: string, slab: InvoiceSlab, discountPercent: number) => Promise<void>;
 
   workers: Worker[];
@@ -854,6 +859,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             invoice_id: invoiceRow.id,
             item_type: 'glass',
             description: i.description,
+            area: i.area || null,
             thickness_mm: i.thicknessMm || null,
             sort_order: idx,
             length_in: i.lengthIn,
@@ -873,6 +879,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             invoice_id: invoiceRow.id,
             item_type: 'simple',
             description: i.description,
+            area: i.area || null,
             sort_order: idx,
             quantity: i.quantity,
             rate: i.rate,
@@ -1011,6 +1018,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             rate: Number(it.rate),
           }
     );
+  }, []);
+
+  // Unlike fetchQuotationItems above (which returns the editable draft
+  // shape for QuotationModal, with no computed sft/rft/amount), this
+  // returns the same fully-computed item shape invoices use — needed so
+  // PrintableDocument can show a quotation's real itemized Glass
+  // Work/Hardware rows instead of one collapsed summary line.
+  const fetchQuotationItemsForPrint = useCallback(async (quotationDbId: string): Promise<QuotationItem[]> => {
+    const { data } = await supabase.from('quotation_items').select('*').eq('quotation_id', quotationDbId).order('sort_order');
+    return (data ?? []).map(mapQuotationItem);
   }, []);
 
   const addQuotation = async (input: NewQuotationInput): Promise<Quotation | null> => {
@@ -1270,6 +1287,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addQuotation,
       updateQuotation,
       fetchQuotationItems,
+      fetchQuotationItemsForPrint,
       convertQuotationToInvoice,
       workers,
       addWorker,

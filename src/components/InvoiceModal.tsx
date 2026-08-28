@@ -8,6 +8,7 @@ interface DraftItem {
   key: string;
   type: 'glass' | 'simple';
   description: string;
+  area: string;
   // simple
   quantity: string;
   rate: string;
@@ -27,6 +28,7 @@ function blankItem(type: 'glass' | 'simple' = 'simple'): DraftItem {
     key: `item-${draftKeyCounter}`,
     type,
     description: '',
+    area: '',
     quantity: '1',
     rate: '',
     lengthIn: '',
@@ -239,6 +241,7 @@ export default function InvoiceModal() {
         ? {
             type: 'glass',
             description: it.description.trim(),
+            area: it.area.trim() || null,
             lengthIn: roundUpTo6(parseFloat(it.lengthIn) || 0),
             widthIn: roundUpTo6(parseFloat(it.widthIn) || 0),
             qty: parseFloat(it.glassQty) || 0,
@@ -249,6 +252,7 @@ export default function InvoiceModal() {
         : {
             type: 'simple',
             description: it.description.trim(),
+            area: it.area.trim() || null,
             quantity: parseFloat(it.quantity) || 0,
             rate: parseFloat(it.rate) || 0,
           }
@@ -371,6 +375,7 @@ export default function InvoiceModal() {
             <table className="item-table">
               <colgroup>
                 <col style={{ width: 56 }} />
+                <col style={{ width: 100 }} />
                 <col />
                 <col style={{ width: 70 }} />
                 <col style={{ width: 70 }} />
@@ -384,7 +389,8 @@ export default function InvoiceModal() {
               <thead>
                 <tr>
                   <th></th>
-                  <th>Product / Description</th>
+                  <th>Area</th>
+                  <th>Description of Goods</th>
                   <th className="num">L (in)</th>
                   <th className="num">W (in)</th>
                   <th className="num">Qty</th>
@@ -422,6 +428,14 @@ export default function InvoiceModal() {
                             GL
                           </button>
                         </div>
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          value={item.area}
+                          onChange={(e) => updateItem(item.key, { area: e.target.value })}
+                          placeholder="e.g. Hall, Kitchen"
+                        />
                       </td>
                       <td>
                         <input
