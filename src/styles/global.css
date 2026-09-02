@@ -198,6 +198,10 @@ h1, h2, h3 { font-family: var(--font-display); margin: 0; font-weight: 500; }
 .btn-primary { background: var(--gold); color: #14161c; }
 .btn-primary:hover { background: var(--gold-bright); }
 
+/* For destructive confirmations (delete, etc.) — see ConfirmDialog */
+.btn-danger { background: var(--danger); color: #ece7db; }
+.btn-danger:hover { background: #c96058; }
+
 .btn-ghost { background: transparent; border-color: var(--border); color: var(--text); }
 .btn-ghost:hover { border-color: var(--gold); color: var(--gold-bright); }
 

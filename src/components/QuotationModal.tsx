@@ -137,6 +137,7 @@ export default function QuotationModal() {
   const [validUntil, setValidUntil] = useState(defaultValidUntil());
   const [slab, setSlab] = useState<InvoiceSlab>('A');
   const [customDiscount, setCustomDiscount] = useState('0');
+  const [transportation, setTransportation] = useState('');
   const [items, setItems] = useState<DraftItem[]>([blankItem('simple')]);
   const [saving, setSaving] = useState(false);
   const wasOpenRef = useRef(false);
@@ -150,6 +151,7 @@ export default function QuotationModal() {
         setValidUntil(editingQuotation.validUntil);
         setSlab(editingQuotation.slab);
         setCustomDiscount(editingQuotation.slab === 'D' ? String(editingQuotation.discountPercent) : '0');
+        setTransportation(editingQuotation.transportation > 0 ? String(editingQuotation.transportation) : '');
         // Reload the quotation's real saved items into the form — without
         // this, "Edit" opens with no items at all.
         fetchQuotationItems(editingQuotation.dbId).then((loaded) => {
@@ -160,6 +162,7 @@ export default function QuotationModal() {
         setValidUntil(defaultValidUntil());
         setSlab('A');
         setCustomDiscount('0');
+        setTransportation('');
         setItems([blankItem('simple')]);
       }
     }
@@ -197,7 +200,8 @@ export default function QuotationModal() {
   const discountAmount = subtotal * (discountPercent / 100);
   const taxableValue = subtotal - discountAmount;
   const gstAmount = gstEnabled ? Math.round(taxableValue * 0.18) : 0;
-  const grandTotal = taxableValue + gstAmount;
+  const transportNum = parseFloat(transportation) || 0;
+  const grandTotal = taxableValue + gstAmount + transportNum;
 
   const isItemValid = (it: DraftItem) =>
     it.description.trim() &&
@@ -238,9 +242,9 @@ export default function QuotationModal() {
     );
 
     if (editingQuotationId) {
-      await updateQuotation(editingQuotationId, { validUntil, slab, discountPercent, items: payloadItems });
+      await updateQuotation(editingQuotationId, { validUntil, slab, discountPercent, transportation: transportNum, items: payloadItems });
     } else {
-      await addQuotation({ customerId, validUntil, slab, discountPercent, items: payloadItems });
+      await addQuotation({ customerId, validUntil, slab, discountPercent, transportation: transportNum, items: payloadItems });
     }
     setSaving(false);
     closeQuotationModal();
@@ -297,6 +301,10 @@ export default function QuotationModal() {
                 />
               </div>
             )}
+            <div className="form-field">
+              <label>Transportation (₹, optional)</label>
+              <input type="number" value={transportation} onChange={(e) => setTransportation(e.target.value)} placeholder="0.00" />
+            </div>
           </div>
           <div className="row-sub" style={{ marginBottom: 8 }}>
             Stays editable while this quotation is pending — adjust the slab as the price gets
@@ -441,6 +449,7 @@ export default function QuotationModal() {
             Subtotal: ₹{subtotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
             {discountPercent > 0 && <> · Slab {slab} discount ({discountPercent}%): −₹{discountAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</>}
             {gstEnabled && <> · CGST+SGST (18%): ₹{gstAmount.toLocaleString('en-IN')}</>}
+            {transportNum > 0 && <> · Transport: ₹{transportNum.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</>}
             {' · '}
             <strong style={{ color: 'var(--text)' }}>Total: ₹{grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>
           </div>

@@ -212,6 +212,9 @@ export interface Quotation {
   discountPercent: number;
   discountAmount: number;
   gst: number;
+  // Cartage cost, added after GST — mirrors Invoice.transportation.
+  // Carried over automatically when the quotation converts to an invoice.
+  transportation: number;
   date: string;
   validUntil: string;
   status: QuotationStatus;

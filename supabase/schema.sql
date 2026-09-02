@@ -91,6 +91,12 @@ create table invoices (
   due_date date,
   work_status work_status,
   completed_at date,
+  -- Soft delete: deleting an invoice hides it everywhere operational
+  -- (Invoicing list, customer balances, dashboard job counts) but the
+  -- row itself — and its contribution to monthly_revenue_expense — stays,
+  -- so historical revenue figures never silently shrink after a delete.
+  -- See deleteInvoice in AppContext.
+  deleted_at timestamptz,
   created_at timestamptz not null default now()
 );
 create index invoices_customer_id_idx on invoices (customer_id);
@@ -158,6 +164,10 @@ create table quotations (
   discount_percent numeric(5, 2) not null default 10,
   discount_amount numeric(12, 2) not null default 0,
   gst numeric(12, 2) not null default 0,
+  -- Cartage cost, added after GST — mirrors invoices.transportation.
+  -- Carried over automatically when a quotation converts to an invoice
+  -- (see convertQuotationToInvoice in AppContext).
+  transportation numeric(12, 2) not null default 0,
   quotation_date date not null default current_date,
   valid_until date not null,
   status quotation_status not null default 'pending',
@@ -1024,7 +1034,8 @@ select
 from invoices i
 left join (
   select invoice_id, sum(amount) as paid from invoice_payments group by invoice_id
-) p on p.invoice_id = i.id;
+) p on p.invoice_id = i.id
+where i.deleted_at is null;
 
 create view customer_balances with (security_invoker = true) as
 select
@@ -1041,7 +1052,7 @@ select
     end
   ), 0) as outstanding
 from customers c
-left join invoices i on i.customer_id = c.id
+left join invoices i on i.customer_id = c.id and i.deleted_at is null
 left join (
   select invoice_id, sum(amount) as paid from invoice_payments group by invoice_id
 ) p on p.invoice_id = i.id
@@ -1115,10 +1126,10 @@ order by m.month_start;
 create view dashboard_summary with (security_invoker = true) as
 select
   (select count(distinct customer_id) from invoices
-    where date_trunc('month', invoice_date) = date_trunc('month', current_date)) as customers_billed_this_month,
-  (select count(*) from invoices where kind = 'job' and work_status = 'in_progress') as jobs_in_progress,
+    where date_trunc('month', invoice_date) = date_trunc('month', current_date) and deleted_at is null) as customers_billed_this_month,
+  (select count(*) from invoices where kind = 'job' and work_status = 'in_progress' and deleted_at is null) as jobs_in_progress,
   (select count(*) from invoices where kind = 'job' and work_status = 'completed'
-    and date_trunc('month', completed_at) = date_trunc('month', current_date)) as jobs_completed_this_month;
+    and date_trunc('month', completed_at) = date_trunc('month', current_date) and deleted_at is null) as jobs_completed_this_month;
 
 create view worker_month_summary with (security_invoker = true) as
 select

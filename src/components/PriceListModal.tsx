@@ -57,7 +57,7 @@ export default function PriceListModal({ editingItem, onClose }: PriceListModalP
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay is-open" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3>{editingItem ? 'Edit Product' : 'New Product'}</h3>

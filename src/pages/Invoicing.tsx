@@ -1,12 +1,13 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Topbar from '../components/Topbar';
 import StatusBadge from '../components/StatusBadge';
 import PaymentModal from '../components/PaymentModal';
 import CopyReminderButton from '../components/CopyReminderButton';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { useApp } from '../context/AppContext';
 import { formatINR } from '../utils/format';
-import type { InvoiceStatus } from '../types';
+import type { Invoice, InvoiceStatus, Quotation } from '../types';
 
 const STATUS_FILTERS: Array<{ key: InvoiceStatus | 'all'; label: string }> = [
   { key: 'all', label: 'All' },
@@ -27,7 +28,11 @@ export default function Invoicing() {
     openEditQuotationModal,
     markJobCompleted,
     openPaymentModal,
+    deleteInvoice,
+    deleteQuotation,
   } = useApp();
+  const [deleteInvoiceTarget, setDeleteInvoiceTarget] = useState<Invoice | null>(null);
+  const [deleteQuotationTarget, setDeleteQuotationTarget] = useState<Quotation | null>(null);
   // URL-driven (not local state) so converting a quotation from anywhere —
   // the table row, or the print preview overlay — can land the user back
   // on the Invoices tab via navigate('/invoicing?tab=invoices'), even
@@ -150,6 +155,12 @@ export default function Invoicing() {
                         {(i.status === 'due' || i.status === 'overdue' || i.status === 'partial') && (
                           <CopyReminderButton invoice={i} customerName={customerName(i.customerId)} />
                         )}
+                        <button
+                          className="btn btn-ghost btn-small desktop-only"
+                          onClick={() => setDeleteInvoiceTarget(i)}
+                        >
+                          Delete
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -185,13 +196,14 @@ export default function Invoicing() {
                     <td>{customerName(q.customerId)}</td>
                     <td className="row-sub">{q.description}</td>
                     <td className="num">
-                      {formatINR(q.amount - q.discountAmount + q.gst)}
+                      {formatINR(q.amount - q.discountAmount + q.gst + q.transportation)}
                       {q.discountAmount > 0 && (
                         <div className="row-sub">
                           Slab {q.slab} · −{formatINR(q.discountAmount)}
                         </div>
                       )}
                       {q.gst > 0 && <div className="row-sub">incl. {formatINR(q.gst)} GST</div>}
+                      {q.transportation > 0 && <div className="row-sub">+ Transport {formatINR(q.transportation)}</div>}
                     </td>
                     <td className="row-sub">{q.validUntil}</td>
                     <td>
@@ -219,6 +231,11 @@ export default function Invoicing() {
                           </button>
                         </>
                       )}
+                      {q.status !== 'converted' && (
+                        <button className="btn btn-ghost btn-small desktop-only" onClick={() => setDeleteQuotationTarget(q)}>
+                          Delete
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -233,6 +250,30 @@ export default function Invoicing() {
         )}
       </div>
       <PaymentModal />
+      <ConfirmDialog
+        open={deleteInvoiceTarget !== null}
+        title="Delete invoice?"
+        message={`Delete ${deleteInvoiceTarget?.id}? It will be removed from all lists and customer records — but any revenue already recorded from it stays in your monthly figures and reports.`}
+        confirmLabel="Delete"
+        danger
+        onConfirm={async () => {
+          if (deleteInvoiceTarget) await deleteInvoice(deleteInvoiceTarget.dbId);
+          setDeleteInvoiceTarget(null);
+        }}
+        onCancel={() => setDeleteInvoiceTarget(null)}
+      />
+      <ConfirmDialog
+        open={deleteQuotationTarget !== null}
+        title="Delete quotation?"
+        message={`Delete ${deleteQuotationTarget?.id}? This can't be undone.`}
+        confirmLabel="Delete"
+        danger
+        onConfirm={async () => {
+          if (deleteQuotationTarget) await deleteQuotation(deleteQuotationTarget.dbId);
+          setDeleteQuotationTarget(null);
+        }}
+        onCancel={() => setDeleteQuotationTarget(null)}
+      />
     </>
   );
 }

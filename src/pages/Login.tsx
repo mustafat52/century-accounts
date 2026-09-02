@@ -5,10 +5,13 @@ import logoDark from '../assets/logo-dark.png';
 
 const WELCOME_DURATION_MS = 2200;
 
+type AppMode = 'accounts' | 'inventory';
+
 export default function Login() {
   const { login } = useApp();
   const navigate = useNavigate();
 
+  const [mode, setMode] = useState<AppMode>('accounts');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -18,10 +21,12 @@ export default function Login() {
   useEffect(() => {
     if (!welcomeName) return;
     const timer = setTimeout(() => {
-      navigate('/', { replace: true });
+      // The toggle only decides where this same authenticated session
+      // lands — Inventory shares the same login, just a different shell.
+      navigate(mode === 'inventory' ? '/inventory/stock' : '/', { replace: true });
     }, WELCOME_DURATION_MS);
     return () => clearTimeout(timer);
-  }, [welcomeName, navigate]);
+  }, [welcomeName, navigate, mode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,6 +70,29 @@ export default function Login() {
           <img src={logoDark} alt="Century Glass Art" style={{ width: 220, height: 'auto' }} />
         </div>
 
+        <div className="chip-row" role="tablist" aria-label="Choose which app to sign into" style={{ marginBottom: 0 }}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'accounts'}
+            className={`chip${mode === 'accounts' ? ' is-active' : ''}`}
+            style={{ flex: 1, textAlign: 'center' }}
+            onClick={() => setMode('accounts')}
+          >
+            Accounts
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'inventory'}
+            className={`chip${mode === 'inventory' ? ' is-active' : ''}`}
+            style={{ flex: 1, textAlign: 'center' }}
+            onClick={() => setMode('inventory')}
+          >
+            Inventory
+          </button>
+        </div>
+
         <div className="form-field">
           <label>Email</label>
           <input
@@ -88,7 +116,7 @@ export default function Login() {
         {error && <div style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</div>}
 
         <button type="submit" className="btn btn-primary" style={{ marginTop: 4 }} disabled={submitting}>
-          {submitting ? 'Signing in…' : 'Sign in'}
+          {submitting ? 'Signing in…' : `Sign in to ${mode === 'inventory' ? 'Inventory' : 'Accounts'}`}
         </button>
       </form>
     </div>

@@ -1,7 +1,9 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider, useApp } from './context/AppContext';
+import { InventoryProvider } from './context/InventoryContext';
 import Sidebar from './components/Sidebar';
 import MobileNav from './components/MobileNav';
+import InventorySidebar from './components/InventorySidebar';
 import InvoiceModal from './components/InvoiceModal';
 import QuotationModal from './components/QuotationModal';
 import ConvertQuotationModal from './components/ConvertQuotationModal';
@@ -16,6 +18,9 @@ import PurchaseBills from './pages/PurchaseBills';
 import Expenses from './pages/Expenses';
 import Reports from './pages/Reports';
 import Links from './pages/Links';
+import CategoriesStock from './pages/inventory/CategoriesStock';
+import WasteLedger from './pages/inventory/WasteLedger';
+import CuttingPlan from './pages/inventory/CuttingPlan';
 
 function ProtectedShell() {
   const { isAuthenticated, authLoading, dataLoading } = useApp();
@@ -61,11 +66,49 @@ function ProtectedShell() {
   );
 }
 
+// Separate shell from ProtectedShell (spec section 5: separate nav, pages,
+// tables) but reuses the SAME auth state from AppContext — the toggle on
+// the login screen only decides which shell renders after auth succeeds,
+// it isn't a second login system. Data is scoped to its own
+// InventoryProvider rather than AppContext's, per spec section 7.
+function InventoryShell() {
+  const { isAuthenticated, authLoading } = useApp();
+
+  if (authLoading) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', color: 'var(--text-muted)' }}>
+        Loading…
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return (
+    <InventoryProvider>
+      <div className="app">
+        <InventorySidebar />
+        <main className="main">
+          <Routes>
+            <Route path="stock" element={<CategoriesStock />} />
+            <Route path="waste" element={<WasteLedger />} />
+            <Route path="cutting" element={<CuttingPlan />} />
+            <Route index element={<Navigate to="stock" replace />} />
+          </Routes>
+        </main>
+      </div>
+    </InventoryProvider>
+  );
+}
+
 export default function App() {
   return (
     <AppProvider>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/inventory/*" element={<InventoryShell />} />
         <Route path="/*" element={<ProtectedShell />} />
       </Routes>
     </AppProvider>

@@ -105,9 +105,9 @@ export default function Reports() {
     // that quotations carry a real slab/discount.
     return {
       pendingCount: pending.length,
-      pendingAmount: pending.reduce((sum, q) => sum + q.amount - q.discountAmount + q.gst, 0),
+      pendingAmount: pending.reduce((sum, q) => sum + q.amount - q.discountAmount + q.gst + q.transportation, 0),
       convertedCount: converted.length,
-      convertedAmount: converted.reduce((sum, q) => sum + q.amount - q.discountAmount + q.gst, 0),
+      convertedAmount: converted.reduce((sum, q) => sum + q.amount - q.discountAmount + q.gst + q.transportation, 0),
     };
   }, [periodQuotations]);
 

@@ -1,26 +1,44 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 
 export default function VendorModal() {
-  const { isVendorModalOpen, closeVendorModal, addVendor } = useApp();
+  const { isVendorModalOpen, editingVendorId, closeVendorModal, vendors, addVendor, updateVendor } = useApp();
 
   const [name, setName] = useState('');
   const [category, setCategory] = useState('');
   const [contact, setContact] = useState('');
+  const [saving, setSaving] = useState(false);
+  const wasOpenRef = useRef(false);
+
+  const editingVendor = editingVendorId ? vendors.find((v) => v.id === editingVendorId) : null;
 
   useEffect(() => {
-    if (isVendorModalOpen) {
-      setName('');
-      setCategory('');
-      setContact('');
+    if (isVendorModalOpen && !wasOpenRef.current) {
+      if (editingVendor) {
+        setName(editingVendor.name);
+        setCategory(editingVendor.category);
+        setContact(editingVendor.contact);
+      } else {
+        setName('');
+        setCategory('');
+        setContact('');
+      }
     }
-  }, [isVendorModalOpen]);
+    wasOpenRef.current = isVendorModalOpen;
+  }, [isVendorModalOpen, editingVendor]);
 
   if (!isVendorModalOpen) return null;
 
-  const handleSave = () => {
-    if (!name || !contact) return;
-    addVendor({ name, category: category || 'General', contact });
+  const handleSave = async () => {
+    if (!name || !contact || saving) return;
+    setSaving(true);
+    const input = { name, category: category || 'General', contact };
+    if (editingVendorId) {
+      await updateVendor(editingVendorId, input);
+    } else {
+      await addVendor(input);
+    }
+    setSaving(false);
     closeVendorModal();
   };
 
@@ -28,7 +46,7 @@ export default function VendorModal() {
     <div className="modal-overlay is-open" onClick={closeVendorModal}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <h2>New Vendor</h2>
+          <h2>{editingVendorId ? 'Edit Vendor' : 'New Vendor'}</h2>
           <button className="modal-close" onClick={closeVendorModal}>
             &times;
           </button>
@@ -72,8 +90,8 @@ export default function VendorModal() {
           <button className="btn btn-ghost" onClick={closeVendorModal}>
             Cancel
           </button>
-          <button className="btn btn-primary" onClick={handleSave}>
-            Save vendor
+          <button className="btn btn-primary" onClick={handleSave} disabled={!name || !contact || saving}>
+            {saving ? 'Saving…' : editingVendorId ? 'Save changes' : 'Save vendor'}
           </button>
         </div>
       </div>

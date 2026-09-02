@@ -162,6 +162,7 @@ interface NewQuotationInput {
   validUntil: string;
   slab: InvoiceSlab;
   discountPercent: number; // only meaningful when slab === 'D'; otherwise derived from SLAB_DISCOUNT_PERCENT
+  transportation: number;
   items: NewQuotationItemInput[];
 }
 
@@ -169,6 +170,7 @@ interface EditQuotationInput {
   validUntil: string;
   slab: InvoiceSlab;
   discountPercent: number;
+  transportation: number;
   items: NewQuotationItemInput[];
 }
 
@@ -212,9 +214,11 @@ interface AppContextValue {
 
   customers: Customer[];
   addCustomer: (input: NewCustomerInput) => Promise<Customer | null>;
+  updateCustomer: (id: string, input: NewCustomerInput) => Promise<void>;
 
   vendors: Vendor[];
   addVendor: (input: NewVendorInput) => Promise<Vendor | null>;
+  updateVendor: (id: string, input: NewVendorInput) => Promise<void>;
 
   expenses: Expense[];
   addExpense: (input: NewExpenseInput) => Promise<void>;
@@ -237,6 +241,7 @@ interface AppContextValue {
   addInvoice: (input: NewInvoiceInput) => Promise<Invoice | null>;
   markJobCompleted: (invoiceDbId: string) => Promise<void>;
   recordInvoicePayment: (invoiceDbId: string, amount: number, note?: string) => Promise<PaymentReceipt | null>;
+  deleteInvoice: (invoiceDbId: string) => Promise<void>;
 
   quotations: Quotation[];
   addQuotation: (input: NewQuotationInput) => Promise<Quotation | null>;
@@ -244,6 +249,7 @@ interface AppContextValue {
   fetchQuotationItems: (quotationDbId: string) => Promise<NewQuotationItemInput[]>;
   fetchQuotationItemsForPrint: (quotationDbId: string) => Promise<QuotationItem[]>;
   convertQuotationToInvoice: (quotationDbId: string, slab: InvoiceSlab, discountPercent: number) => Promise<void>;
+  deleteQuotation: (quotationDbId: string) => Promise<void>;
 
   workers: Worker[];
   addWorker: (input: NewWorkerInput) => Promise<void>;
@@ -263,11 +269,15 @@ interface AppContextValue {
   closeInvoiceModal: () => void;
 
   isCustomerModalOpen: boolean;
+  editingCustomerId: string | null;
   openCustomerModal: () => void;
+  openEditCustomerModal: (customerId: string) => void;
   closeCustomerModal: () => void;
 
   isVendorModalOpen: boolean;
+  editingVendorId: string | null;
   openVendorModal: () => void;
+  openEditVendorModal: (vendorId: string) => void;
   closeVendorModal: () => void;
 
   isExpenseModalOpen: boolean;
@@ -342,7 +352,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isInvoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [invoiceModalCustomerId, setInvoiceModalCustomerId] = useState<string | null>(null);
   const [isCustomerModalOpen, setCustomerModalOpen] = useState(false);
+  const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [isVendorModalOpen, setVendorModalOpen] = useState(false);
+  const [editingVendorId, setEditingVendorId] = useState<string | null>(null);
   const [isExpenseModalOpen, setExpenseModalOpen] = useState(false);
   const [isQuotationModalOpen, setQuotationModalOpen] = useState(false);
   const [quotationModalCustomerId, setQuotationModalCustomerId] = useState<string | null>(null);
@@ -607,6 +619,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
     setVendors((prev) => [newVendor, ...prev]);
     return newVendor;
+  };
+
+  const updateCustomer = async (id: string, input: NewCustomerInput) => {
+    const { error } = await supabase
+      .from('customers')
+      .update({ name: input.name, contact: input.contact || null, address: input.address || null, gstin: input.gstin || null })
+      .eq('id', id);
+    if (error) return;
+    await refreshCustomers();
+  };
+
+  const updateVendor = async (id: string, input: NewVendorInput) => {
+    const { error } = await supabase
+      .from('vendors')
+      .update({ name: input.name, category: input.category, contact: input.contact })
+      .eq('id', id);
+    if (error) return;
+    await refreshVendors();
   };
 
   // ---------- Expenses (non-vendor only) ----------
@@ -935,6 +965,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return receipt;
   };
 
+  // Soft delete — sets deleted_at rather than removing the row. This hides
+  // the invoice from Invoicing/Dashboard/customer balances (all filtered
+  // by invoices_effective/customer_balances/dashboard_summary excluding
+  // deleted_at is not null) while leaving monthly_revenue_expense
+  // untouched, so any revenue already recognized from this invoice stays
+  // in the business stats/charts exactly as before.
+  const deleteInvoice = async (invoiceDbId: string) => {
+    const { error } = await supabase.from('invoices').update({ deleted_at: new Date().toISOString() }).eq('id', invoiceDbId);
+    if (error) return;
+    setInvoices((prev) => prev.filter((i) => i.dbId !== invoiceDbId));
+    await Promise.all([refreshCustomers(), refreshDashboardSummary()]);
+  };
+
   // ---------- Quotations ----------
   // Reuses the same roundUpTo6 defined above (invoices section) — must
   // match the client-side preview exactly, or the modal's live total would
@@ -1049,6 +1092,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         discount_percent: discountPercent,
         discount_amount: discountAmount,
         gst,
+        transportation: input.transportation || 0,
         valid_until: input.validUntil,
       })
       .select()
@@ -1085,6 +1129,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         discount_percent: discountPercent,
         discount_amount: discountAmount,
         gst,
+        transportation: input.transportation || 0,
         valid_until: input.validUntil,
       })
       .eq('id', quotationDbId)
@@ -1130,6 +1175,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         discount_percent: resolvedDiscountPercent,
         discount_amount: discountAmount,
         gst,
+        // Carried straight over from the quotation — cartage doesn't get
+        // re-negotiated just because the slab/discount might change here.
+        transportation: Number(qRow.transportation ?? 0),
         work_status: 'in_progress',
       })
       .select()
@@ -1178,6 +1226,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (full) setInvoices((prev) => [full, ...prev]);
     setQuotations((prev) => prev.map((q) => (q.dbId === quotationDbId ? { ...q, status: 'converted' } : q)));
     await Promise.all([refreshCustomers(), refreshDashboardSummary()]);
+  };
+
+  // Hard delete — unlike invoices, quotations never have payments recorded
+  // against them, so there's no historical revenue to preserve. Only
+  // pending/expired quotations should ever reach this (UI hides the
+  // option once status = 'converted', since the trail to a real invoice
+  // shouldn't be severed).
+  const deleteQuotation = async (quotationDbId: string) => {
+    const { error } = await supabase.from('quotations').delete().eq('id', quotationDbId);
+    if (error) return;
+    setQuotations((prev) => prev.filter((q) => q.dbId !== quotationDbId));
   };
 
   // ---------- Workers / Payslips ----------
@@ -1265,8 +1324,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       toggleGst,
       customers,
       addCustomer,
+      updateCustomer,
       vendors,
       addVendor,
+      updateVendor,
       expenses,
       addExpense,
       vendorPurchases,
@@ -1283,12 +1344,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addInvoice,
       markJobCompleted,
       recordInvoicePayment,
+      deleteInvoice,
       quotations,
       addQuotation,
       updateQuotation,
       fetchQuotationItems,
       fetchQuotationItemsForPrint,
       convertQuotationToInvoice,
+      deleteQuotation,
       workers,
       addWorker,
       logWorkerAdvance,
@@ -1306,11 +1369,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       },
       closeInvoiceModal: () => setInvoiceModalOpen(false),
       isCustomerModalOpen,
-      openCustomerModal: () => setCustomerModalOpen(true),
-      closeCustomerModal: () => setCustomerModalOpen(false),
+      editingCustomerId,
+      openCustomerModal: () => {
+        setEditingCustomerId(null);
+        setCustomerModalOpen(true);
+      },
+      openEditCustomerModal: (customerId: string) => {
+        setEditingCustomerId(customerId);
+        setCustomerModalOpen(true);
+      },
+      closeCustomerModal: () => {
+        setCustomerModalOpen(false);
+        setEditingCustomerId(null);
+      },
       isVendorModalOpen,
-      openVendorModal: () => setVendorModalOpen(true),
-      closeVendorModal: () => setVendorModalOpen(false),
+      editingVendorId,
+      openVendorModal: () => {
+        setEditingVendorId(null);
+        setVendorModalOpen(true);
+      },
+      openEditVendorModal: (vendorId: string) => {
+        setEditingVendorId(vendorId);
+        setVendorModalOpen(true);
+      },
+      closeVendorModal: () => {
+        setVendorModalOpen(false);
+        setEditingVendorId(null);
+      },
       isExpenseModalOpen,
       openExpenseModal: () => setExpenseModalOpen(true),
       closeExpenseModal: () => setExpenseModalOpen(false),
@@ -1388,7 +1473,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       isInvoiceModalOpen,
       invoiceModalCustomerId,
       isCustomerModalOpen,
+      editingCustomerId,
       isVendorModalOpen,
+      editingVendorId,
       isExpenseModalOpen,
       isQuotationModalOpen,
       quotationModalCustomerId,

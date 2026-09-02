@@ -124,7 +124,7 @@ export default function PrintableDocument() {
 
   const cust = customer(doc.customerId);
   const isInvoice = printTarget.kind === 'invoice';
-  const transportation = invoice?.transportation ?? 0;
+  const transportation = invoice?.transportation ?? quotation?.transportation ?? 0;
   const discountAmount = invoice?.discountAmount ?? quotation?.discountAmount ?? 0;
   const slab = invoice?.slab ?? quotation?.slab ?? 'A';
   const total = doc.amount - discountAmount + doc.gst + transportation;

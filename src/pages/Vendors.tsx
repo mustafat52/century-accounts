@@ -24,7 +24,7 @@ interface HistoryRow {
 }
 
 export default function Vendors() {
-  const { vendors, vendorPurchases, vendorSlips, openVendorModal, openPrint } = useApp();
+  const { vendors, vendorPurchases, vendorSlips, openVendorModal, openEditVendorModal, openPrint } = useApp();
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
   const [purchaseModalVendorId, setPurchaseModalVendorId] = useState<string | null>(null);
   const [slipModalVendorId, setSlipModalVendorId] = useState<string | null>(null);
@@ -91,9 +91,14 @@ export default function Vendors() {
           subtitle={`${selectedVendor.category} · ${selectedVendor.contact}`}
         />
         <div className="view-body">
-          <button className="btn btn-ghost btn-small" style={{ marginBottom: 16 }} onClick={() => setSelectedVendorId(null)}>
-            ← All vendors
-          </button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <button className="btn btn-ghost btn-small" onClick={() => setSelectedVendorId(null)}>
+              ← All vendors
+            </button>
+            <button className="btn btn-ghost btn-small desktop-only" onClick={() => openEditVendorModal(selectedVendor.id)}>
+              Edit Vendor
+            </button>
+          </div>
 
           <div className="stat-grid" style={{ marginBottom: 24 }}>
             <div className="facet-card">
@@ -224,6 +229,7 @@ export default function Vendors() {
         <VendorSlipModal vendorId={slipModalVendorId} onClose={() => setSlipModalVendorId(null)} />
         <VendorPaymentModal vendor={paymentVendor} onClose={() => setPaymentVendorId(null)} />
         <PriceSlipModal slip={pricingSlip} onClose={() => setPricingSlip(null)} />
+        <VendorModal />
       </>
     );
   }

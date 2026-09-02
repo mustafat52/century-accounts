@@ -116,6 +116,7 @@ export function mapQuotation(row: any): Quotation {
     discountPercent: Number(row.discount_percent ?? 0),
     discountAmount: Number(row.discount_amount ?? 0),
     gst: Number(row.gst),
+    transportation: Number(row.transportation ?? 0),
     date: row.quotation_date,
     validUntil: row.valid_until,
     status: row.status,

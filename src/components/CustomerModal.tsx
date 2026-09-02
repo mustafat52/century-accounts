@@ -1,28 +1,47 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 
 export default function CustomerModal() {
-  const { isCustomerModalOpen, closeCustomerModal, addCustomer } = useApp();
+  const { isCustomerModalOpen, editingCustomerId, closeCustomerModal, customers, addCustomer, updateCustomer } = useApp();
 
   const [name, setName] = useState('');
   const [contact, setContact] = useState('');
   const [address, setAddress] = useState('');
   const [gstin, setGstin] = useState('');
+  const [saving, setSaving] = useState(false);
+  const wasOpenRef = useRef(false);
+
+  const editingCustomer = editingCustomerId ? customers.find((c) => c.id === editingCustomerId) : null;
 
   useEffect(() => {
-    if (isCustomerModalOpen) {
-      setName('');
-      setContact('');
-      setAddress('');
-      setGstin('');
+    if (isCustomerModalOpen && !wasOpenRef.current) {
+      if (editingCustomer) {
+        setName(editingCustomer.name);
+        setContact(editingCustomer.contact ?? '');
+        setAddress(editingCustomer.address ?? '');
+        setGstin(editingCustomer.gstin ?? '');
+      } else {
+        setName('');
+        setContact('');
+        setAddress('');
+        setGstin('');
+      }
     }
-  }, [isCustomerModalOpen]);
+    wasOpenRef.current = isCustomerModalOpen;
+  }, [isCustomerModalOpen, editingCustomer]);
 
   if (!isCustomerModalOpen) return null;
 
-  const handleSave = () => {
-    if (!name || !contact) return;
-    addCustomer({ name, contact, address: address || undefined, gstin: gstin || undefined });
+  const handleSave = async () => {
+    if (!name || !contact || saving) return;
+    setSaving(true);
+    const input = { name, contact, address: address || undefined, gstin: gstin || undefined };
+    if (editingCustomerId) {
+      await updateCustomer(editingCustomerId, input);
+    } else {
+      await addCustomer(input);
+    }
+    setSaving(false);
     closeCustomerModal();
   };
 
@@ -30,7 +49,7 @@ export default function CustomerModal() {
     <div className="modal-overlay is-open" onClick={closeCustomerModal}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <h2>New Customer</h2>
+          <h2>{editingCustomerId ? 'Edit Customer' : 'New Customer'}</h2>
           <button className="modal-close" onClick={closeCustomerModal}>
             &times;
           </button>
@@ -85,8 +104,8 @@ export default function CustomerModal() {
           <button className="btn btn-ghost" onClick={closeCustomerModal}>
             Cancel
           </button>
-          <button className="btn btn-primary" onClick={handleSave}>
-            Save customer
+          <button className="btn btn-primary" onClick={handleSave} disabled={!name || !contact || saving}>
+            {saving ? 'Saving…' : editingCustomerId ? 'Save changes' : 'Save customer'}
           </button>
         </div>
       </div>

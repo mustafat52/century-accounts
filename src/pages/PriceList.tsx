@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import Topbar from '../components/Topbar';
 import PriceListModal from '../components/PriceListModal';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { useApp } from '../context/AppContext';
 import { formatINR } from '../utils/format';
 import type { PriceListItem } from '../types';
@@ -9,6 +10,7 @@ export default function PriceList() {
   const { priceList, deletePriceListItem } = useApp();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<PriceListItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PriceListItem | null>(null);
 
   const openAdd = () => {
     setEditingItem(null);
@@ -25,10 +27,10 @@ export default function PriceList() {
     setEditingItem(null);
   };
 
-  const handleDelete = (item: PriceListItem) => {
-    if (window.confirm(`Remove "${item.description}" from the price list? This won't affect any past invoices.`)) {
-      deletePriceListItem(item.id);
-    }
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    deletePriceListItem(deleteTarget.id);
+    setDeleteTarget(null);
   };
 
   return (
@@ -65,7 +67,7 @@ export default function PriceList() {
                   <td>
                     <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                       <button className="btn btn-ghost btn-small desktop-only" onClick={() => openEdit(item)}>Edit</button>
-                      <button className="btn btn-ghost btn-small desktop-only" onClick={() => handleDelete(item)}>Delete</button>
+                      <button className="btn btn-ghost btn-small desktop-only" onClick={() => setDeleteTarget(item)}>Delete</button>
                     </div>
                   </td>
                 </tr>
@@ -80,6 +82,15 @@ export default function PriceList() {
         </div>
       </div>
       {modalOpen && <PriceListModal editingItem={editingItem} onClose={closeModal} />}
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Remove product?"
+        message={`Remove "${deleteTarget?.description}" from the price list? This won't affect any past invoices.`}
+        confirmLabel="Remove"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </>
   );
 }

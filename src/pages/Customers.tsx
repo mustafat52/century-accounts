@@ -16,7 +16,7 @@ function CustomerDetailModal({
   customer: Customer | null;
   onClose: () => void;
 }) {
-  const { invoices, openInvoiceModal, openPrint, openPaymentModal } = useApp();
+  const { invoices, openInvoiceModal, openPrint, openPaymentModal, openEditCustomerModal } = useApp();
 
   if (!customer) return null;
 
@@ -125,6 +125,15 @@ function CustomerDetailModal({
         <div className="modal-foot">
           <button className="btn btn-ghost" onClick={onClose}>
             Close
+          </button>
+          <button
+            className="btn btn-ghost desktop-only"
+            onClick={() => {
+              onClose();
+              openEditCustomerModal(customer.id);
+            }}
+          >
+            Edit
           </button>
           <button className="btn btn-ghost" onClick={() => exportCustomerLedger(customer, invoices)}>
             Export (Excel)

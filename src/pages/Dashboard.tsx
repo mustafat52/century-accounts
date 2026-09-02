@@ -82,19 +82,19 @@ export default function Dashboard() {
             <div className="panel-head">
               <h3>Revenue vs Expenses — last 6 months</h3>
             </div>
-            <div style={{ padding: '20px 20px 8px', height: 260 }}>
+            <div style={{ padding: '20px 20px 8px', height: 280 }}>
               {hasPieData ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
+                  <PieChart margin={{ top: 16, right: 16, bottom: 16, left: 16 }}>
                     <Pie
                       data={revenueVsExpensePie}
                       dataKey="value"
                       nameKey="name"
                       cx="50%"
                       cy="50%"
-                      outerRadius={85}
-                      label={(entry) => `${entry.name}: ${formatINR(entry.value)}`}
-                      labelLine={{ stroke: '#948f84' }}
+                      outerRadius={78}
+                      label={({ percent }) => `${((percent ?? 0) * 100).toFixed(0)}%`}
+                      labelLine={false}
                     >
                       {revenueVsExpensePie.map((d) => (
                         <Cell key={d.name} fill={d.color} />
