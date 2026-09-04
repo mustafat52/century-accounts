@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
+import { capitalizeFirst } from '../utils/format';
 
 export default function CustomerModal() {
   const { isCustomerModalOpen, editingCustomerId, closeCustomerModal, customers, addCustomer, updateCustomer } = useApp();
@@ -46,7 +47,10 @@ export default function CustomerModal() {
   };
 
   return (
-    <div className="modal-overlay is-open" onClick={closeCustomerModal}>
+    // No onClick here anymore — a stray click outside the modal used to
+    // wipe out everything typed so far. Now the modal only closes via the
+    // explicit × or Cancel button below.
+    <div className="modal-overlay is-open">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h2>{editingCustomerId ? 'Edit Customer' : 'New Customer'}</h2>
@@ -62,7 +66,7 @@ export default function CustomerModal() {
               <input
                 type="text"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => setName(capitalizeFirst(e.target.value))}
                 placeholder="e.g. Riverside Interiors"
               />
             </div>
@@ -93,7 +97,7 @@ export default function CustomerModal() {
               <input
                 type="text"
                 value={address}
-                onChange={(e) => setAddress(e.target.value)}
+                onChange={(e) => setAddress(capitalizeFirst(e.target.value))}
                 placeholder="Shop / building, street, area, city"
               />
             </div>

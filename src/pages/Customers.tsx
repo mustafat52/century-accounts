@@ -25,7 +25,7 @@ function CustomerDetailModal({
     .sort((a, b) => (a.date < b.date ? 1 : -1));
 
   return (
-    <div className="modal-overlay is-open" onClick={onClose}>
+    <div className="modal-overlay is-open">
       <div className="modal modal-xl" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h2>{customer.name}</h2>
@@ -150,8 +150,16 @@ function CustomerDetailModal({
 export default function Customers() {
   const { customers, invoices, openCustomerModal } = useApp();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
 
   const selected = customers.find((c) => c.id === selectedId) ?? null;
+
+  const query = search.trim().toLowerCase();
+  const filteredCustomers = query
+    ? customers.filter(
+        (c) => c.name.toLowerCase().includes(query) || (c.contact ?? '').toLowerCase().includes(query)
+      )
+    : customers;
 
   return (
     <>
@@ -160,7 +168,14 @@ export default function Customers() {
         <div className="panel">
           <div className="panel-head">
             <h3>{customers.length} customers</h3>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                type="text"
+                className="search-input"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search customers…"
+              />
               <button className="btn btn-ghost btn-small" onClick={() => exportAllCustomersLedger(customers, invoices)}>
                 Export All (Excel)
               </button>
@@ -178,7 +193,14 @@ export default function Customers() {
               </tr>
             </thead>
             <tbody>
-              {customers.map((c) => (
+              {filteredCustomers.length === 0 && (
+                <tr>
+                  <td className="row-sub" colSpan={3}>
+                    No customers match “{search}”.
+                  </td>
+                </tr>
+              )}
+              {filteredCustomers.map((c) => (
                 <tr key={c.id} onClick={() => setSelectedId(c.id)} style={{ cursor: 'pointer' }}>
                   <td>
                     <div className="row-name">{c.name}</div>

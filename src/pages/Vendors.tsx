@@ -30,6 +30,7 @@ export default function Vendors() {
   const [slipModalVendorId, setSlipModalVendorId] = useState<string | null>(null);
   const [paymentVendorId, setPaymentVendorId] = useState<string | null>(null);
   const [pricingSlip, setPricingSlip] = useState<VendorSlip | null>(null);
+  const [search, setSearch] = useState('');
 
   const selectedVendor = vendors.find((v) => v.id === selectedVendorId);
   const paymentVendor = vendors.find((v) => v.id === paymentVendorId) ?? null;
@@ -234,6 +235,16 @@ export default function Vendors() {
     );
   }
 
+  const query = search.trim().toLowerCase();
+  const filteredVendors = query
+    ? vendors.filter(
+        (v) =>
+          v.name.toLowerCase().includes(query) ||
+          v.category.toLowerCase().includes(query) ||
+          v.contact.toLowerCase().includes(query)
+      )
+    : vendors;
+
   return (
     <>
       <Topbar title="Vendors" subtitle="Raw material and service suppliers, purchases and payables" />
@@ -241,9 +252,18 @@ export default function Vendors() {
         <div className="panel">
           <div className="panel-head">
             <h3>{vendors.length} vendors</h3>
-            <button className="btn btn-ghost btn-small desktop-only" onClick={openVendorModal}>
-              + New Vendor
-            </button>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                type="text"
+                className="search-input"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search vendors…"
+              />
+              <button className="btn btn-ghost btn-small desktop-only" onClick={openVendorModal}>
+                + New Vendor
+              </button>
+            </div>
           </div>
           <table>
             <thead>
@@ -255,7 +275,14 @@ export default function Vendors() {
               </tr>
             </thead>
             <tbody>
-              {vendors.map((v) => (
+              {filteredVendors.length === 0 && (
+                <tr>
+                  <td className="row-sub" colSpan={4}>
+                    No vendors match “{search}”.
+                  </td>
+                </tr>
+              )}
+              {filteredVendors.map((v) => (
                 <tr key={v.id} onClick={() => setSelectedVendorId(v.id)} style={{ cursor: 'pointer' }}>
                   <td>
                     <div className="row-name">{v.name}</div>

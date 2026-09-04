@@ -3,12 +3,14 @@ import { useApp } from '../context/AppContext';
 import type { NewInvoiceItemInput } from '../context/AppContext';
 import type { InvoiceKind, InvoiceSlab } from '../types';
 import { SLAB_DISCOUNT_PERCENT } from '../types';
+import { capitalizeFirst } from '../utils/format';
 
 interface DraftItem {
   key: string;
   type: 'glass' | 'simple';
   description: string;
   area: string;
+  thicknessMm: string;
   // simple
   quantity: string;
   rate: string;
@@ -29,6 +31,7 @@ function blankItem(type: 'glass' | 'simple' = 'simple'): DraftItem {
     type,
     description: '',
     area: '',
+    thicknessMm: '',
     quantity: '1',
     rate: '',
     lengthIn: '',
@@ -140,10 +143,15 @@ export default function InvoiceModal() {
   const [customerName, setCustomerName] = useState('');
   const [kind, setKind] = useState<InvoiceKind>('quick');
   const [dueDate, setDueDate] = useState('');
-  const [slab, setSlab] = useState<InvoiceSlab>('A');
+  const [slab, setSlab] = useState<InvoiceSlab>('D');
   const [customDiscount, setCustomDiscount] = useState('0');
   const [transportation, setTransportation] = useState('');
   const [items, setItems] = useState<DraftItem[]>([blankItem('simple')]);
+  // Which item-type table is currently shown while editing. This is purely
+  // a display filter — the saved invoice always combines items of both
+  // types from the underlying `items` array regardless of which tab is
+  // active when it's saved.
+  const [activeTab, setActiveTab] = useState<'glass' | 'simple'>('simple');
   const [saving, setSaving] = useState(false);
 
   const wasOpenRef = useRef(false);
@@ -154,25 +162,36 @@ export default function InvoiceModal() {
       setCustomerName(preset?.name ?? '');
       setKind('quick');
       setDueDate('');
-      setSlab('A');
+      setSlab('D');
       setCustomDiscount('0');
       setTransportation('');
       setItems([blankItem('simple')]);
+      setActiveTab('simple');
     }
     wasOpenRef.current = isInvoiceModalOpen;
   }, [isInvoiceModalOpen, invoiceModalCustomerId, customers]);
 
-  // Auto-add: the moment the last row becomes fully valid, silently append
-  // a fresh blank row of the same type — no clicking "+ Add" needed for the
-  // common case of entering several similar items in a row. The newly
-  // added row is blank (invalid), so this settles after one append and
-  // won't loop.
+  // Auto-add: the moment the last row OF A GIVEN TYPE becomes fully valid,
+  // silently append a fresh blank row of that same type. Tracked
+  // independently per type (glass vs simple) since the two now live in
+  // separate tabs — filling in the last glass row shouldn't touch the
+  // hardware tab's rows, and vice versa.
   useEffect(() => {
-    if (items.length === 0) return;
-    const last = items[items.length - 1];
-    if (isItemValid(last)) {
-      setItems((prev) => [...prev, blankItem(last.type)]);
-    }
+    (['glass', 'simple'] as const).forEach((t) => {
+      const ofType = items.filter((i) => i.type === t);
+      if (ofType.length === 0) return;
+      const last = ofType[ofType.length - 1];
+      if (isItemValid(last)) {
+        setItems((prev) => {
+          const prevOfType = prev.filter((i) => i.type === t);
+          const prevLast = prevOfType[prevOfType.length - 1];
+          if (prevLast && prevLast.key === last.key) {
+            return [...prev, blankItem(t)];
+          }
+          return prev;
+        });
+      }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items]);
 
@@ -182,7 +201,8 @@ export default function InvoiceModal() {
     setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)));
   };
 
-  const updateDescription = (key: string, value: string) => {
+  const updateDescription = (key: string, rawValue: string) => {
+    const value = capitalizeFirst(rawValue);
     // Typing a name that exactly matches a price-list entry (from picking
     // the native datalist suggestion, or just typing it out) auto-fills
     // the rate fields — same shortcut as the old dropdown, just typable.
@@ -199,8 +219,24 @@ export default function InvoiceModal() {
     }
   };
 
+  // Keep at least one row of whichever type is being removed from —
+  // removing the last row of the tab you're looking at is blocked, but
+  // doesn't block removal just because the other tab still has rows.
   const removeItem = (key: string) => {
-    setItems((prev) => (prev.length > 1 ? prev.filter((it) => it.key !== key) : prev));
+    setItems((prev) => {
+      const item = prev.find((it) => it.key === key);
+      if (!item) return prev;
+      const sameTypeCount = prev.filter((it) => it.type === item.type).length;
+      if (sameTypeCount <= 1) return prev;
+      return prev.filter((it) => it.key !== key);
+    });
+  };
+
+  // Switching to a tab with zero items of that type auto-adds one blank
+  // row immediately, so the tab is never empty and typing can start right away.
+  const switchTab = (t: 'glass' | 'simple') => {
+    setActiveTab(t);
+    setItems((prev) => (prev.some((it) => it.type === t) ? prev : [...prev, blankItem(t)]));
   };
 
   const subtotal = items.reduce((sum, it) => sum + computeItemAmount(it), 0);
@@ -214,6 +250,12 @@ export default function InvoiceModal() {
   const realItems = items.filter(isItemValid);
   const fuzzyCustomerMatch = findFuzzyCustomerMatch(customerName, customers);
   const isValid = customerName.trim() && realItems.length > 0 && (kind === 'job' || dueDate);
+
+  // Counts shown on the tab labels — valid/filled items only, so the
+  // trailing auto-added blank draft row of each type never counts.
+  const simpleCount = items.filter((it) => it.type === 'simple' && isItemValid(it)).length;
+  const glassCount = items.filter((it) => it.type === 'glass' && isItemValid(it)).length;
+  const visibleItems = items.filter((it) => it.type === activeTab);
 
   const handleSave = async () => {
     if (!isValid || saving) return;
@@ -242,6 +284,7 @@ export default function InvoiceModal() {
             type: 'glass',
             description: it.description.trim(),
             area: it.area.trim() || null,
+            thicknessMm: it.thicknessMm.trim() || null,
             lengthIn: roundUpTo6(parseFloat(it.lengthIn) || 0),
             widthIn: roundUpTo6(parseFloat(it.widthIn) || 0),
             qty: parseFloat(it.glassQty) || 0,
@@ -272,7 +315,10 @@ export default function InvoiceModal() {
   };
 
   return (
-    <div className="modal-overlay is-open" onClick={closeInvoiceModal}>
+    // No onClick here anymore — a stray click outside the modal used to
+    // wipe out a whole in-progress invoice. Now it only closes via the
+    // explicit × or Cancel button below.
+    <div className="modal-overlay is-open">
       <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h2>New Invoice</h2>
@@ -290,7 +336,7 @@ export default function InvoiceModal() {
                 type="text"
                 list="customer-options"
                 value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
+                onChange={(e) => setCustomerName(capitalizeFirst(e.target.value))}
                 placeholder="Pick a customer or type a new name"
               />
               <datalist id="customer-options">
@@ -371,38 +417,67 @@ export default function InvoiceModal() {
             ))}
           </datalist>
 
+          {/* ---- Type tabs: purely a display filter over `items` ---- */}
+          <div className="chip-row">
+            <button
+              type="button"
+              className={`chip${activeTab === 'simple' ? ' is-active' : ''}`}
+              onClick={() => switchTab('simple')}
+            >
+              Hardware / Simple ({simpleCount})
+            </button>
+            <button
+              type="button"
+              className={`chip${activeTab === 'glass' ? ' is-active' : ''}`}
+              onClick={() => switchTab('glass')}
+            >
+              Glass (by size) ({glassCount})
+            </button>
+          </div>
+
           <div className="item-table-wrap">
             <table className="item-table">
-              <colgroup>
-                <col style={{ width: 56 }} />
-                <col style={{ width: 100 }} />
-                <col />
-                <col style={{ width: 70 }} />
-                <col style={{ width: 70 }} />
-                <col style={{ width: 56 }} />
-                <col style={{ width: 84 }} />
-                <col style={{ width: 76 }} />
-                <col style={{ width: 76 }} />
-                <col style={{ width: 110 }} />
-                <col style={{ width: 32 }} />
-              </colgroup>
+              {activeTab === 'glass' ? (
+                <colgroup>
+                  <col style={{ width: 100 }} />
+                  <col />
+                  <col style={{ width: 90 }} />
+                  <col style={{ width: 70 }} />
+                  <col style={{ width: 70 }} />
+                  <col style={{ width: 56 }} />
+                  <col style={{ width: 84 }} />
+                  <col style={{ width: 76 }} />
+                  <col style={{ width: 76 }} />
+                  <col style={{ width: 110 }} />
+                  <col style={{ width: 32 }} />
+                </colgroup>
+              ) : (
+                <colgroup>
+                  <col style={{ width: 120 }} />
+                  <col />
+                  <col style={{ width: 70 }} />
+                  <col style={{ width: 90 }} />
+                  <col style={{ width: 120 }} />
+                  <col style={{ width: 32 }} />
+                </colgroup>
+              )}
               <thead>
                 <tr>
-                  <th></th>
                   <th>Area</th>
                   <th>Description of Goods</th>
-                  <th className="num">L (in)</th>
-                  <th className="num">W (in)</th>
+                  {activeTab === 'glass' && <th>Thickness (mm)</th>}
+                  {activeTab === 'glass' && <th className="num">L (in)</th>}
+                  {activeTab === 'glass' && <th className="num">W (in)</th>}
                   <th className="num">Qty</th>
                   <th className="num">Rate</th>
-                  <th className="num">Polish</th>
-                  <th className="num">Fixing</th>
+                  {activeTab === 'glass' && <th className="num">Polish</th>}
+                  {activeTab === 'glass' && <th className="num">Fixing</th>}
                   <th className="num">Amount</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => {
+                {visibleItems.map((item) => {
                   const isGlass = item.type === 'glass';
                   const glassCalc = isGlass ? computeGlassAmount(item) : null;
                   const amount = computeItemAmount(item);
@@ -410,30 +485,10 @@ export default function InvoiceModal() {
                   return (
                     <tr key={item.key}>
                       <td>
-                        <div className="item-table-type-toggle">
-                          <button
-                            type="button"
-                            className={`item-table-type-btn${!isGlass ? ' is-active' : ''}`}
-                            title="Hardware / Simple"
-                            onClick={() => updateItem(item.key, { type: 'simple' })}
-                          >
-                            HW
-                          </button>
-                          <button
-                            type="button"
-                            className={`item-table-type-btn${isGlass ? ' is-active' : ''}`}
-                            title="Glass (by size)"
-                            onClick={() => updateItem(item.key, { type: 'glass' })}
-                          >
-                            GL
-                          </button>
-                        </div>
-                      </td>
-                      <td>
                         <input
                           type="text"
                           value={item.area}
-                          onChange={(e) => updateItem(item.key, { area: e.target.value })}
+                          onChange={(e) => updateItem(item.key, { area: capitalizeFirst(e.target.value) })}
                           placeholder="e.g. Hall, Kitchen"
                         />
                       </td>
@@ -446,40 +501,49 @@ export default function InvoiceModal() {
                           placeholder={isGlass ? 'Pick a product or type a custom description' : 'e.g. Silicon sealant'}
                         />
                       </td>
-                      {isGlass ? (
-                        <>
-                          <td className="num">
-                            <input type="number" value={item.lengthIn} onChange={(e) => updateItem(item.key, { lengthIn: e.target.value })} />
-                          </td>
-                          <td className="num">
-                            <input type="number" value={item.widthIn} onChange={(e) => updateItem(item.key, { widthIn: e.target.value })} />
-                          </td>
-                          <td className="num">
-                            <input type="number" value={item.glassQty} onChange={(e) => updateItem(item.key, { glassQty: e.target.value })} />
-                          </td>
-                          <td className="num">
-                            <input type="number" value={item.ratePerSft} onChange={(e) => updateItem(item.key, { ratePerSft: e.target.value })} />
-                          </td>
-                          <td className="num">
-                            <input type="number" value={item.polishRate} onChange={(e) => updateItem(item.key, { polishRate: e.target.value })} />
-                          </td>
-                          <td className="num">
-                            <input type="number" value={item.fixingRatePerSft} onChange={(e) => updateItem(item.key, { fixingRatePerSft: e.target.value })} />
-                          </td>
-                        </>
-                      ) : (
-                        <>
-                          <td className="num"><input type="text" disabled value="—" /></td>
-                          <td className="num"><input type="text" disabled value="—" /></td>
-                          <td className="num">
-                            <input type="number" value={item.quantity} onChange={(e) => updateItem(item.key, { quantity: e.target.value })} />
-                          </td>
-                          <td className="num">
-                            <input type="number" value={item.rate} onChange={(e) => updateItem(item.key, { rate: e.target.value })} />
-                          </td>
-                          <td className="num"><input type="text" disabled value="—" /></td>
-                          <td className="num"><input type="text" disabled value="—" /></td>
-                        </>
+                      {isGlass && (
+                        <td>
+                          <input
+                            type="text"
+                            value={item.thicknessMm}
+                            onChange={(e) => updateItem(item.key, { thicknessMm: capitalizeFirst(e.target.value) })}
+                            placeholder="e.g. 12mm"
+                          />
+                        </td>
+                      )}
+                      {isGlass && (
+                        <td className="num">
+                          <input type="number" value={item.lengthIn} onChange={(e) => updateItem(item.key, { lengthIn: e.target.value })} />
+                        </td>
+                      )}
+                      {isGlass && (
+                        <td className="num">
+                          <input type="number" value={item.widthIn} onChange={(e) => updateItem(item.key, { widthIn: e.target.value })} />
+                        </td>
+                      )}
+                      <td className="num">
+                        <input
+                          type="number"
+                          value={isGlass ? item.glassQty : item.quantity}
+                          onChange={(e) => updateItem(item.key, isGlass ? { glassQty: e.target.value } : { quantity: e.target.value })}
+                        />
+                      </td>
+                      <td className="num">
+                        <input
+                          type="number"
+                          value={isGlass ? item.ratePerSft : item.rate}
+                          onChange={(e) => updateItem(item.key, isGlass ? { ratePerSft: e.target.value } : { rate: e.target.value })}
+                        />
+                      </td>
+                      {isGlass && (
+                        <td className="num">
+                          <input type="number" value={item.polishRate} onChange={(e) => updateItem(item.key, { polishRate: e.target.value })} />
+                        </td>
+                      )}
+                      {isGlass && (
+                        <td className="num">
+                          <input type="number" value={item.fixingRatePerSft} onChange={(e) => updateItem(item.key, { fixingRatePerSft: e.target.value })} />
+                        </td>
                       )}
                       <td className="num item-table-amount">
                         {money(amount)}
@@ -502,11 +566,8 @@ export default function InvoiceModal() {
           </div>
 
           <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-            <button className="btn btn-ghost btn-small" onClick={() => setItems((prev) => [...prev, blankItem('simple')])} type="button">
-              + Add Hardware Item
-            </button>
-            <button className="btn btn-ghost btn-small" onClick={() => setItems((prev) => [...prev, blankItem('glass')])} type="button">
-              + Add Glass Item
+            <button className="btn btn-ghost btn-small" onClick={() => setItems((prev) => [...prev, blankItem(activeTab)])} type="button">
+              + Add Item
             </button>
           </div>
 

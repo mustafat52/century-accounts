@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import type { ExpenseCategory } from '../types';
+import { capitalizeFirst } from '../utils/format';
 
 const VENDOR_CATEGORIES: ExpenseCategory[] = ['Raw Material', 'Maintenance', 'Transport'];
 
@@ -32,7 +33,7 @@ export default function VendorPurchaseModal({ vendorId, onClose }: { vendorId: s
   };
 
   return (
-    <div className="modal-overlay is-open" onClick={onClose}>
+    <div className="modal-overlay is-open">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h2>Record Purchase</h2>
@@ -65,7 +66,7 @@ export default function VendorPurchaseModal({ vendorId, onClose }: { vendorId: s
               <input
                 type="text"
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                onChange={(e) => setDescription(capitalizeFirst(e.target.value))}
                 placeholder="e.g. Sheet glass restock — 150 units"
               />
             </div>

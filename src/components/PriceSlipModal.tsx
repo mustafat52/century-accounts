@@ -38,7 +38,7 @@ export default function PriceSlipModal({ slip, onClose }: { slip: VendorSlip | n
   };
 
   return (
-    <div className="modal-overlay is-open" onClick={onClose}>
+    <div className="modal-overlay is-open">
       <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h2>Enter Prices — {slip.dcNo}</h2>

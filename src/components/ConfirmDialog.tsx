@@ -26,7 +26,7 @@ export default function ConfirmDialog({
   if (!open) return null;
 
   return (
-    <div className="modal-overlay is-open" onClick={onCancel}>
+    <div className="modal-overlay is-open">
       <div className="modal" style={{ width: 420 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3>{title}</h3>

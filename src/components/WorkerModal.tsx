@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import { capitalizeFirst } from '../utils/format';
 
 export default function WorkerModal() {
   const { isWorkerModalOpen, closeWorkerModal, addWorker } = useApp();
@@ -24,7 +25,7 @@ export default function WorkerModal() {
   };
 
   return (
-    <div className="modal-overlay is-open" onClick={closeWorkerModal}>
+    <div className="modal-overlay is-open">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h2>New Worker</h2>
@@ -37,7 +38,7 @@ export default function WorkerModal() {
           <div className="form-row">
             <div className="form-field">
               <label>Worker name</label>
-              <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Ramesh" />
+              <input type="text" value={name} onChange={(e) => setName(capitalizeFirst(e.target.value))} placeholder="e.g. Ramesh" />
             </div>
           </div>
           <div className="form-row">

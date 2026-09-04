@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import { capitalizeFirst } from '../utils/format';
 
 export default function LinkModal() {
   const { isLinkModalOpen, closeLinkModal, addLink } = useApp();
@@ -26,7 +27,7 @@ export default function LinkModal() {
   };
 
   return (
-    <div className="modal-overlay is-open" onClick={closeLinkModal}>
+    <div className="modal-overlay is-open">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h2>New Link</h2>
@@ -39,7 +40,7 @@ export default function LinkModal() {
           <div className="form-row">
             <div className="form-field">
               <label>Label</label>
-              <input type="text" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. GST Portal" />
+              <input type="text" value={label} onChange={(e) => setLabel(capitalizeFirst(e.target.value))} placeholder="e.g. GST Portal" />
             </div>
           </div>
           <div className="form-row">
@@ -51,7 +52,7 @@ export default function LinkModal() {
           <div className="form-row">
             <div className="form-field">
               <label>Category (optional)</label>
-              <input type="text" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="e.g. Government / Supplier / Banking" />
+              <input type="text" value={category} onChange={(e) => setCategory(capitalizeFirst(e.target.value))} placeholder="e.g. Government / Supplier / Banking" />
             </div>
           </div>
         </div>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import type { PriceListItem } from '../types';
+import { capitalizeFirst } from '../utils/format';
 
 interface PriceListModalProps {
   editingItem: PriceListItem | null;
@@ -57,7 +58,7 @@ export default function PriceListModal({ editingItem, onClose }: PriceListModalP
   };
 
   return (
-    <div className="modal-overlay is-open" onClick={onClose}>
+    <div className="modal-overlay is-open">
       <div className="modal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3>{editingItem ? 'Edit Product' : 'New Product'}</h3>
@@ -69,7 +70,7 @@ export default function PriceListModal({ editingItem, onClose }: PriceListModalP
             <input
               type="text"
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={(e) => setDescription(capitalizeFirst(e.target.value))}
               placeholder="e.g. 12mm Tuff"
               autoFocus
             />

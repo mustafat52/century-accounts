@@ -55,7 +55,7 @@ export default function ConvertQuotationModal() {
   };
 
   return (
-    <div className="modal-overlay is-open" onClick={closeConvertQuotationModal}>
+    <div className="modal-overlay is-open">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h2>Convert to Invoice</h2>

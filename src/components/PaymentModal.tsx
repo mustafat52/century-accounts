@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { formatINR } from '../utils/format';
+import { formatINR, capitalizeFirst } from '../utils/format';
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -36,7 +36,7 @@ export default function PaymentModal() {
   };
 
   return (
-    <div className="modal-overlay is-open" onClick={closePaymentModal}>
+    <div className="modal-overlay is-open">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h2>Record Payment</h2>
@@ -64,7 +64,7 @@ export default function PaymentModal() {
           <div className="form-row">
             <div className="form-field">
               <label>Note (optional)</label>
-              <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. advance for materials" />
+              <input type="text" value={note} onChange={(e) => setNote(capitalizeFirst(e.target.value))} placeholder="e.g. advance for materials" />
             </div>
           </div>
 

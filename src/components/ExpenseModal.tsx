@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import type { ExpenseCategory } from '../types';
+import { capitalizeFirst } from '../utils/format';
 
 const CATEGORIES: ExpenseCategory[] = [
   'Raw Material',
@@ -40,7 +41,7 @@ export default function ExpenseModal() {
   };
 
   return (
-    <div className="modal-overlay is-open" onClick={closeExpenseModal}>
+    <div className="modal-overlay is-open">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h2>Record Expense</h2>
@@ -73,7 +74,7 @@ export default function ExpenseModal() {
               <input
                 type="text"
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                onChange={(e) => setDescription(capitalizeFirst(e.target.value))}
                 placeholder="e.g. Monthly workshop rent"
               />
             </div>

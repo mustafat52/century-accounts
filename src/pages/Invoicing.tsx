@@ -33,6 +33,7 @@ export default function Invoicing() {
   } = useApp();
   const [deleteInvoiceTarget, setDeleteInvoiceTarget] = useState<Invoice | null>(null);
   const [deleteQuotationTarget, setDeleteQuotationTarget] = useState<Quotation | null>(null);
+  const [search, setSearch] = useState('');
   // URL-driven (not local state) so converting a quotation from anywhere —
   // the table row, or the print preview overlay — can land the user back
   // on the Invoices tab via navigate('/invoicing?tab=invoices'), even
@@ -50,27 +51,56 @@ export default function Invoicing() {
 
   const customerName = (id: string) => customers.find((c) => c.id === id)?.name ?? '—';
 
+  const query = search.trim().toLowerCase();
+
+  // Search matches the invoice/quotation number itself, its description,
+  // or — the main use case — the customer's name, so typing a customer
+  // pulls up every invoice/quotation for them regardless of which tab or
+  // status filter is currently active.
+  const matchesSearch = (id: string, custId: string, description: string) =>
+    !query ||
+    id.toLowerCase().includes(query) ||
+    customerName(custId).toLowerCase().includes(query) ||
+    description.toLowerCase().includes(query);
+
   const filteredInvoices = useMemo(
-    () => (filter === 'all' ? invoices : invoices.filter((i) => i.status === filter)),
-    [invoices, filter]
+    () =>
+      (filter === 'all' ? invoices : invoices.filter((i) => i.status === filter)).filter((i) =>
+        matchesSearch(i.id, i.customerId, i.description)
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [invoices, filter, query, customers]
   );
 
   const sortedQuotations = useMemo(
-    () => [...quotations].sort((a, b) => (a.date < b.date ? 1 : -1)),
-    [quotations]
+    () =>
+      [...quotations]
+        .filter((q) => matchesSearch(q.id, q.customerId, q.description))
+        .sort((a, b) => (a.date < b.date ? 1 : -1)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [quotations, query, customers]
   );
 
   return (
     <>
       <Topbar title="Invoicing" subtitle="Quick sales, job-order invoices, and quotations — in one place" showInvoiceActions />
       <div className="view-body">
-        <div className="chip-row">
-          <button className={`chip${tab === 'invoices' ? ' is-active' : ''}`} onClick={() => setTab('invoices')}>
-            Invoices
-          </button>
-          <button className={`chip${tab === 'quotations' ? ' is-active' : ''}`} onClick={() => setTab('quotations')}>
-            Quotations
-          </button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div className="chip-row" style={{ marginBottom: 0 }}>
+            <button className={`chip${tab === 'invoices' ? ' is-active' : ''}`} onClick={() => setTab('invoices')}>
+              Invoices
+            </button>
+            <button className={`chip${tab === 'quotations' ? ' is-active' : ''}`} onClick={() => setTab('quotations')}>
+              Quotations
+            </button>
+          </div>
+          <input
+            type="text"
+            className="search-input"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by customer, invoice # or description…"
+          />
         </div>
 
         {tab === 'invoices' && (
@@ -107,6 +137,11 @@ export default function Invoicing() {
                   </tr>
                 </thead>
                 <tbody>
+                  {filteredInvoices.length === 0 && (
+                    <tr>
+                      <td className="row-sub">{query ? `No invoices match “${search}”.` : 'No invoices yet.'}</td>
+                    </tr>
+                  )}
                   {filteredInvoices.map((i) => (
                     <tr key={i.id}>
                       <td>{i.id}</td>
@@ -241,7 +276,7 @@ export default function Invoicing() {
                 ))}
                 {sortedQuotations.length === 0 && (
                   <tr>
-                    <td className="row-sub">No quotations yet.</td>
+                    <td className="row-sub">{query ? `No quotations match “${search}”.` : 'No quotations yet.'}</td>
                   </tr>
                 )}
               </tbody>

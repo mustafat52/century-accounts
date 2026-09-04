@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import type { CareOf } from '../types';
+import { capitalizeFirst } from '../utils/format';
 
 const CARE_OF_OPTIONS: CareOf[] = ['Shabbir Bhai', 'Abdul Hussain Bhai', 'Taqi Bhai'];
 
@@ -65,7 +66,7 @@ export default function VendorSlipModal({ vendorId, onClose }: { vendorId: strin
   };
 
   return (
-    <div className="modal-overlay is-open" onClick={onClose}>
+    <div className="modal-overlay is-open">
       <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h2>New Slip (DC)</h2>
@@ -121,7 +122,7 @@ export default function VendorSlipModal({ vendorId, onClose }: { vendorId: strin
                       <input
                         type="text"
                         value={item.description}
-                        onChange={(e) => updateItem(item.key, { description: e.target.value })}
+                        onChange={(e) => updateItem(item.key, { description: capitalizeFirst(e.target.value) })}
                         placeholder="e.g. Hinges, 4 inch"
                       />
                     </td>
@@ -137,7 +138,7 @@ export default function VendorSlipModal({ vendorId, onClose }: { vendorId: strin
                       <input
                         type="text"
                         value={item.unit}
-                        onChange={(e) => updateItem(item.key, { unit: e.target.value })}
+                        onChange={(e) => updateItem(item.key, { unit: capitalizeFirst(e.target.value) })}
                         placeholder="e.g. pcs, box"
                       />
                     </td>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
+import { capitalizeFirst } from '../utils/format';
 
 export default function VendorModal() {
   const { isVendorModalOpen, editingVendorId, closeVendorModal, vendors, addVendor, updateVendor } = useApp();
@@ -43,7 +44,7 @@ export default function VendorModal() {
   };
 
   return (
-    <div className="modal-overlay is-open" onClick={closeVendorModal}>
+    <div className="modal-overlay is-open">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h2>{editingVendorId ? 'Edit Vendor' : 'New Vendor'}</h2>
@@ -59,7 +60,7 @@ export default function VendorModal() {
               <input
                 type="text"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => setName(capitalizeFirst(e.target.value))}
                 placeholder="e.g. Prism Glass Supplies"
               />
             </div>
@@ -70,7 +71,7 @@ export default function VendorModal() {
               <input
                 type="text"
                 value={category}
-                onChange={(e) => setCategory(e.target.value)}
+                onChange={(e) => setCategory(capitalizeFirst(e.target.value))}
                 placeholder="e.g. Raw Material — Sheet Glass"
               />
             </div>

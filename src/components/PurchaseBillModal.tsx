@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import type { PurchaseBillTaxType } from '../types';
+import { capitalizeFirst } from '../utils/format';
 
 const GST_RATES = [5, 12, 18, 28];
 
@@ -126,7 +127,7 @@ export default function PurchaseBillModal({ isOpen, onClose }: { isOpen: boolean
   };
 
   return (
-    <div className="modal-overlay is-open" onClick={handleClose}>
+    <div className="modal-overlay is-open">
       <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h2>New Purchase Bill</h2>
@@ -156,7 +157,7 @@ export default function PurchaseBillModal({ isOpen, onClose }: { isOpen: boolean
               <input
                 type="text"
                 value={supplierName}
-                onChange={(e) => setSupplierName(e.target.value)}
+                onChange={(e) => setSupplierName(capitalizeFirst(e.target.value))}
                 placeholder="e.g. Rajneesh Glass Agencies"
               />
             </div>
@@ -168,7 +169,7 @@ export default function PurchaseBillModal({ isOpen, onClose }: { isOpen: boolean
               <input
                 type="text"
                 value={supplierAddress}
-                onChange={(e) => setSupplierAddress(e.target.value)}
+                onChange={(e) => setSupplierAddress(capitalizeFirst(e.target.value))}
                 placeholder="e.g. #6-4-63/1 Part, Shivrampally Station Road, Kattedan, Hyderabad"
               />
             </div>
@@ -188,7 +189,7 @@ export default function PurchaseBillModal({ isOpen, onClose }: { isOpen: boolean
           <div className="form-row">
             <div className="form-field">
               <label>Place of supply (state)</label>
-              <input type="text" value={placeOfSupply} onChange={(e) => setPlaceOfSupply(e.target.value)} placeholder="e.g. Telangana" />
+              <input type="text" value={placeOfSupply} onChange={(e) => setPlaceOfSupply(capitalizeFirst(e.target.value))} placeholder="e.g. Telangana" />
             </div>
             <div className="form-field">
               <label>Tax type</label>
@@ -254,7 +255,7 @@ export default function PurchaseBillModal({ isOpen, onClose }: { isOpen: boolean
                         <input
                           type="text"
                           value={item.description}
-                          onChange={(e) => updateItem(item.key, { description: e.target.value })}
+                          onChange={(e) => updateItem(item.key, { description: capitalizeFirst(e.target.value) })}
                           placeholder="e.g. 8MM Clear Plain Glass"
                         />
                       </td>

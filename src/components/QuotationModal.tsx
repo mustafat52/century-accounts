@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext';
 import type { NewQuotationItemInput } from '../context/AppContext';
 import type { InvoiceSlab } from '../types';
 import { SLAB_DISCOUNT_PERCENT } from '../types';
+import { capitalizeFirst } from '../utils/format';
 
 interface DraftItem {
   key: string;
@@ -101,7 +102,7 @@ function computeGlassAmount(it: DraftItem) {
   const polish = rft * polishRate;
   const fixing = sft * fixingRate;
 
-  return { sft, rft, amount: workGlass + polish + fixing };
+  return { len, wid, sft, rft, amount: workGlass + polish + fixing };
 }
 
 function computeSimpleAmount(it: DraftItem) {
@@ -110,6 +111,18 @@ function computeSimpleAmount(it: DraftItem) {
 
 function computeItemAmount(it: DraftItem): number {
   return it.type === 'glass' ? computeGlassAmount(it).amount : computeSimpleAmount(it);
+}
+
+function isItemValid(it: DraftItem): boolean {
+  return Boolean(
+    it.description.trim() &&
+      (it.type === 'simple'
+        ? (parseFloat(it.quantity) || 0) > 0 && (parseFloat(it.rate) || 0) > 0
+        : (parseFloat(it.lengthIn) || 0) > 0 &&
+          (parseFloat(it.widthIn) || 0) > 0 &&
+          (parseFloat(it.glassQty) || 0) > 0 &&
+          (parseFloat(it.ratePerSft) || 0) > 0)
+  );
 }
 
 function defaultValidUntil(): string {
@@ -160,6 +173,8 @@ function findFuzzyCustomerMatch(typed: string, customers: { id: string; name: st
   return best;
 }
 
+const money = (n: number) => `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+
 export default function QuotationModal() {
   const {
     isQuotationModalOpen,
@@ -178,10 +193,15 @@ export default function QuotationModal() {
 
   const [customerName, setCustomerName] = useState('');
   const [validUntil, setValidUntil] = useState(defaultValidUntil());
-  const [slab, setSlab] = useState<InvoiceSlab>('A');
+  const [slab, setSlab] = useState<InvoiceSlab>('D');
   const [customDiscount, setCustomDiscount] = useState('0');
   const [transportation, setTransportation] = useState('');
   const [items, setItems] = useState<DraftItem[]>([blankItem('simple')]);
+  // Which item-type table is currently shown while editing. Purely a
+  // display filter — the saved quotation always combines items of both
+  // types from the underlying `items` array regardless of which tab is
+  // active when it's saved. Mirrors InvoiceModal exactly.
+  const [activeTab, setActiveTab] = useState<'glass' | 'simple'>('simple');
   const [saving, setSaving] = useState(false);
   const wasOpenRef = useRef(false);
 
@@ -196,6 +216,7 @@ export default function QuotationModal() {
         setSlab(editingQuotation.slab);
         setCustomDiscount(editingQuotation.slab === 'D' ? String(editingQuotation.discountPercent) : '0');
         setTransportation(editingQuotation.transportation > 0 ? String(editingQuotation.transportation) : '');
+        setActiveTab('simple');
         // Reload the quotation's real saved items into the form — without
         // this, "Edit" opens with no items at all.
         fetchQuotationItems(editingQuotation.dbId).then((loaded) => {
@@ -205,14 +226,39 @@ export default function QuotationModal() {
         const preset = quotationModalCustomerId ? customers.find((c) => c.id === quotationModalCustomerId) : null;
         setCustomerName(preset?.name ?? '');
         setValidUntil(defaultValidUntil());
-        setSlab('A');
+        setSlab('D');
         setCustomDiscount('0');
         setTransportation('');
         setItems([blankItem('simple')]);
+        setActiveTab('simple');
       }
     }
     wasOpenRef.current = isQuotationModalOpen;
   }, [isQuotationModalOpen, quotationModalCustomerId, editingQuotation, customers, fetchQuotationItems]);
+
+  // Auto-add: the moment the last row OF A GIVEN TYPE becomes fully valid,
+  // silently append a fresh blank row of that same type. Tracked
+  // independently per type (glass vs simple), matching InvoiceModal — this
+  // is new behavior for Quotation, which previously required clicking
+  // "+ Add" for every single row.
+  useEffect(() => {
+    (['glass', 'simple'] as const).forEach((t) => {
+      const ofType = items.filter((i) => i.type === t);
+      if (ofType.length === 0) return;
+      const last = ofType[ofType.length - 1];
+      if (isItemValid(last)) {
+        setItems((prev) => {
+          const prevOfType = prev.filter((i) => i.type === t);
+          const prevLast = prevOfType[prevOfType.length - 1];
+          if (prevLast && prevLast.key === last.key) {
+            return [...prev, blankItem(t)];
+          }
+          return prev;
+        });
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
 
   if (!isQuotationModalOpen) return null;
 
@@ -220,7 +266,8 @@ export default function QuotationModal() {
     setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)));
   };
 
-  const updateDescription = (key: string, value: string) => {
+  const updateDescription = (key: string, rawValue: string) => {
+    const value = capitalizeFirst(rawValue);
     // Same shortcut as InvoiceModal: typing a name that exactly matches a
     // price-list entry auto-fills the rate fields.
     const match = priceList.find((p) => p.description.trim().toLowerCase() === value.trim().toLowerCase());
@@ -236,8 +283,24 @@ export default function QuotationModal() {
     }
   };
 
+  // Keep at least one row of whichever type is being removed from —
+  // removing the last row of the tab you're looking at is blocked, but
+  // doesn't block removal just because the other tab still has rows.
   const removeItem = (key: string) => {
-    setItems((prev) => (prev.length > 1 ? prev.filter((it) => it.key !== key) : prev));
+    setItems((prev) => {
+      const item = prev.find((it) => it.key === key);
+      if (!item) return prev;
+      const sameTypeCount = prev.filter((it) => it.type === item.type).length;
+      if (sameTypeCount <= 1) return prev;
+      return prev.filter((it) => it.key !== key);
+    });
+  };
+
+  // Switching to a tab with zero items of that type auto-adds one blank
+  // row immediately, so the tab is never empty and typing can start right away.
+  const switchTab = (t: 'glass' | 'simple') => {
+    setActiveTab(t);
+    setItems((prev) => (prev.some((it) => it.type === t) ? prev : [...prev, blankItem(t)]));
   };
 
   const subtotal = items.reduce((sum, it) => sum + computeItemAmount(it), 0);
@@ -248,17 +311,20 @@ export default function QuotationModal() {
   const transportNum = parseFloat(transportation) || 0;
   const grandTotal = taxableValue + gstAmount + transportNum;
 
-  const isItemValid = (it: DraftItem) =>
-    it.description.trim() &&
-    (it.type === 'simple'
-      ? (parseFloat(it.quantity) || 0) > 0 && (parseFloat(it.rate) || 0) > 0
-      : (parseFloat(it.lengthIn) || 0) > 0 &&
-        (parseFloat(it.widthIn) || 0) > 0 &&
-        (parseFloat(it.glassQty) || 0) > 0 &&
-        (parseFloat(it.ratePerSft) || 0) > 0);
-
+  // Only rows that are actually filled in count toward validity/saving —
+  // the trailing auto-added blank draft row of each type is expected to be
+  // invalid and must NOT block saving (unlike the old item-card version,
+  // which never auto-added rows so requiring every row to be valid was
+  // safe there).
+  const realItems = items.filter(isItemValid);
   const fuzzyCustomerMatch = findFuzzyCustomerMatch(customerName, customers);
-  const isValid = customerName.trim() && validUntil && items.every(isItemValid);
+  const isValid = customerName.trim() && validUntil && realItems.length > 0;
+
+  // Counts shown on the tab labels — valid/filled items only, so the
+  // trailing auto-added blank draft row of each type never counts.
+  const simpleCount = items.filter((it) => it.type === 'simple' && isItemValid(it)).length;
+  const glassCount = items.filter((it) => it.type === 'glass' && isItemValid(it)).length;
+  const visibleItems = items.filter((it) => it.type === activeTab);
 
   const handleSave = async () => {
     if (!isValid || saving) return;
@@ -283,7 +349,7 @@ export default function QuotationModal() {
       customerId = created.id;
     }
 
-    const payloadItems: NewQuotationItemInput[] = items.map((it) =>
+    const payloadItems: NewQuotationItemInput[] = realItems.map((it) =>
       it.type === 'glass'
         ? {
             type: 'glass',
@@ -316,7 +382,10 @@ export default function QuotationModal() {
   };
 
   return (
-    <div className="modal-overlay is-open" onClick={closeQuotationModal}>
+    // No onClick here anymore — a stray click outside the modal used to
+    // wipe out a whole in-progress quotation. Now it only closes via the
+    // explicit × or Cancel button below.
+    <div className="modal-overlay is-open">
       <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h2>{editingQuotationId ? 'Edit Quotation' : 'New Quotation'}</h2>
@@ -333,7 +402,7 @@ export default function QuotationModal() {
                 type="text"
                 list="customer-options"
                 value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
+                onChange={(e) => setCustomerName(capitalizeFirst(e.target.value))}
                 placeholder="Pick a customer or type a new name"
                 disabled={!!editingQuotationId}
               />
@@ -405,137 +474,167 @@ export default function QuotationModal() {
             ))}
           </datalist>
 
-          {items.map((item) => {
-            const isGlass = item.type === 'glass';
-            const glassCalc = isGlass ? computeGlassAmount(item) : null;
-            const amount = computeItemAmount(item);
-
-            return (
-              <div className="item-card" key={item.key}>
-                <div className="item-card-head">
-                  <div className="item-type-toggle">
-                    <button
-                      type="button"
-                      className={`chip${item.type === 'simple' ? ' is-active' : ''}`}
-                      onClick={() => updateItem(item.key, { type: 'simple' })}
-                    >
-                      Hardware / Simple
-                    </button>
-                    <button
-                      type="button"
-                      className={`chip${isGlass ? ' is-active' : ''}`}
-                      onClick={() => updateItem(item.key, { type: 'glass' })}
-                    >
-                      Glass (by size)
-                    </button>
-                  </div>
-                  <button className="item-card-remove" onClick={() => removeItem(item.key)} type="button">
-                    Remove
-                  </button>
-                </div>
-
-                <div className="item-fields">
-                  <div className="form-field">
-                    <label>Area</label>
-                    <input
-                      type="text"
-                      value={item.area}
-                      onChange={(e) => updateItem(item.key, { area: e.target.value })}
-                      placeholder="e.g. Bar Counter, MBR Shower"
-                    />
-                  </div>
-                  <div className="form-field span-2">
-                    <label>Description of Goods</label>
-                    <input
-                      type="text"
-                      list="price-list-options"
-                      value={item.description}
-                      onChange={(e) => updateDescription(item.key, e.target.value)}
-                      placeholder={isGlass ? 'e.g. Grey mirror + CP' : 'e.g. Silicon sealant'}
-                    />
-                  </div>
-
-                  {isGlass ? (
-                    <>
-                      <div className="form-field">
-                        <label>Thickness (mm)</label>
-                        <input
-                          type="text"
-                          value={item.thicknessMm}
-                          onChange={(e) => updateItem(item.key, { thicknessMm: e.target.value })}
-                          placeholder="e.g. 12MM"
-                        />
-                      </div>
-                      <div className="form-field">
-                        <label>Length (in)</label>
-                        <input type="number" value={item.lengthIn} onChange={(e) => updateItem(item.key, { lengthIn: e.target.value })} />
-                      </div>
-                      <div className="form-field">
-                        <label>Width (in)</label>
-                        <input type="number" value={item.widthIn} onChange={(e) => updateItem(item.key, { widthIn: e.target.value })} />
-                      </div>
-                      <div className="form-field">
-                        <label>Qty (pieces)</label>
-                        <input type="number" value={item.glassQty} onChange={(e) => updateItem(item.key, { glassQty: e.target.value })} />
-                      </div>
-                      <div className="form-field">
-                        <label>Rate / Sft (₹)</label>
-                        <input type="number" value={item.ratePerSft} onChange={(e) => updateItem(item.key, { ratePerSft: e.target.value })} />
-                      </div>
-                      <div className="form-field">
-                        <label>Polish rate / Rft (₹, optional)</label>
-                        <input type="number" value={item.polishRate} onChange={(e) => updateItem(item.key, { polishRate: e.target.value })} />
-                      </div>
-                      <div className="form-field">
-                        <label>Fixing rate / Sft (₹, optional)</label>
-                        <input type="number" value={item.fixingRatePerSft} onChange={(e) => updateItem(item.key, { fixingRatePerSft: e.target.value })} />
-                      </div>
-                      <div className="form-field span-2">
-                        <label>Computed</label>
-                        <input
-                          type="text"
-                          disabled
-                          value={`${glassCalc!.sft.toFixed(2)} sft · ${glassCalc!.rft.toFixed(2)} rft`}
-                        />
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="form-field">
-                        <label>Qty</label>
-                        <input type="number" value={item.quantity} onChange={(e) => updateItem(item.key, { quantity: e.target.value })} />
-                      </div>
-                      <div className="form-field">
-                        <label>Rate (₹)</label>
-                        <input type="number" value={item.rate} onChange={(e) => updateItem(item.key, { rate: e.target.value })} />
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                <div className="item-card-total">
-                  Line total: <strong>₹{amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>
-                </div>
-              </div>
-            );
-          })}
-
-          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-            <button className="btn btn-ghost btn-small" onClick={() => setItems((prev) => [...prev, blankItem('simple')])} type="button">
-              + Add Hardware Item
+          {/* ---- Type tabs: purely a display filter over `items` ---- */}
+          <div className="chip-row">
+            <button
+              type="button"
+              className={`chip${activeTab === 'simple' ? ' is-active' : ''}`}
+              onClick={() => switchTab('simple')}
+            >
+              Hardware / Simple ({simpleCount})
             </button>
-            <button className="btn btn-ghost btn-small" onClick={() => setItems((prev) => [...prev, blankItem('glass')])} type="button">
-              + Add Glass Item
+            <button
+              type="button"
+              className={`chip${activeTab === 'glass' ? ' is-active' : ''}`}
+              onClick={() => switchTab('glass')}
+            >
+              Glass (by size) ({glassCount})
             </button>
           </div>
 
-          <div className="row-sub" style={{ marginTop: 6, textAlign: 'right' }}>
-            Subtotal: ₹{subtotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-            {discountPercent > 0 && <> · Slab {slab} discount ({discountPercent}%): −₹{discountAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</>}
-            {gstEnabled && <> · CGST+SGST (18%): ₹{gstAmount.toLocaleString('en-IN')}</>}
-            {transportNum > 0 && <> · Transport: ₹{transportNum.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</>}
-            {' · '}
-            <strong style={{ color: 'var(--text)' }}>Total: ₹{grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>
+          <div className="item-table-wrap">
+            <table className="item-table">
+              {activeTab === 'glass' ? (
+                <colgroup>
+                  <col style={{ width: 100 }} />
+                  <col />
+                  <col style={{ width: 90 }} />
+                  <col style={{ width: 70 }} />
+                  <col style={{ width: 70 }} />
+                  <col style={{ width: 56 }} />
+                  <col style={{ width: 84 }} />
+                  <col style={{ width: 76 }} />
+                  <col style={{ width: 76 }} />
+                  <col style={{ width: 110 }} />
+                  <col style={{ width: 32 }} />
+                </colgroup>
+              ) : (
+                <colgroup>
+                  <col style={{ width: 120 }} />
+                  <col />
+                  <col style={{ width: 70 }} />
+                  <col style={{ width: 90 }} />
+                  <col style={{ width: 120 }} />
+                  <col style={{ width: 32 }} />
+                </colgroup>
+              )}
+              <thead>
+                <tr>
+                  <th>Area</th>
+                  <th>Description of Goods</th>
+                  {activeTab === 'glass' && <th>Thickness (mm)</th>}
+                  {activeTab === 'glass' && <th className="num">L (in)</th>}
+                  {activeTab === 'glass' && <th className="num">W (in)</th>}
+                  <th className="num">Qty</th>
+                  <th className="num">Rate</th>
+                  {activeTab === 'glass' && <th className="num">Polish</th>}
+                  {activeTab === 'glass' && <th className="num">Fixing</th>}
+                  <th className="num">Amount</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleItems.map((item) => {
+                  const isGlass = item.type === 'glass';
+                  const glassCalc = isGlass ? computeGlassAmount(item) : null;
+                  const amount = computeItemAmount(item);
+
+                  return (
+                    <tr key={item.key}>
+                      <td>
+                        <input
+                          type="text"
+                          value={item.area}
+                          onChange={(e) => updateItem(item.key, { area: capitalizeFirst(e.target.value) })}
+                          placeholder="e.g. Bar Counter, MBR Shower"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          list="price-list-options"
+                          value={item.description}
+                          onChange={(e) => updateDescription(item.key, e.target.value)}
+                          placeholder={isGlass ? 'e.g. Grey mirror + CP' : 'e.g. Silicon sealant'}
+                        />
+                      </td>
+                      {isGlass && (
+                        <td>
+                          <input
+                            type="text"
+                            value={item.thicknessMm}
+                            onChange={(e) => updateItem(item.key, { thicknessMm: capitalizeFirst(e.target.value) })}
+                            placeholder="e.g. 12mm"
+                          />
+                        </td>
+                      )}
+                      {isGlass && (
+                        <td className="num">
+                          <input type="number" value={item.lengthIn} onChange={(e) => updateItem(item.key, { lengthIn: e.target.value })} />
+                        </td>
+                      )}
+                      {isGlass && (
+                        <td className="num">
+                          <input type="number" value={item.widthIn} onChange={(e) => updateItem(item.key, { widthIn: e.target.value })} />
+                        </td>
+                      )}
+                      <td className="num">
+                        <input
+                          type="number"
+                          value={isGlass ? item.glassQty : item.quantity}
+                          onChange={(e) => updateItem(item.key, isGlass ? { glassQty: e.target.value } : { quantity: e.target.value })}
+                        />
+                      </td>
+                      <td className="num">
+                        <input
+                          type="number"
+                          value={isGlass ? item.ratePerSft : item.rate}
+                          onChange={(e) => updateItem(item.key, isGlass ? { ratePerSft: e.target.value } : { rate: e.target.value })}
+                        />
+                      </td>
+                      {isGlass && (
+                        <td className="num">
+                          <input type="number" value={item.polishRate} onChange={(e) => updateItem(item.key, { polishRate: e.target.value })} />
+                        </td>
+                      )}
+                      {isGlass && (
+                        <td className="num">
+                          <input type="number" value={item.fixingRatePerSft} onChange={(e) => updateItem(item.key, { fixingRatePerSft: e.target.value })} />
+                        </td>
+                      )}
+                      <td className="num item-table-amount">
+                        {money(amount)}
+                        {isGlass && glassCalc && (glassCalc.len > 0 || glassCalc.wid > 0) && (
+                          <span className="item-table-sub">
+                            {glassCalc.len}×{glassCalc.wid}in · {glassCalc.sft.toFixed(2)} sft · {glassCalc.rft.toFixed(2)} rft
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <button className="item-table-remove" type="button" onClick={() => removeItem(item.key)} title="Remove">
+                          ×
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            <button className="btn btn-ghost btn-small" onClick={() => setItems((prev) => [...prev, blankItem(activeTab)])} type="button">
+              + Add Item
+            </button>
+          </div>
+
+          <div className="row-sub" style={{ marginTop: 6, textAlign: 'right', lineHeight: 1.8 }}>
+            Subtotal: {money(subtotal)}
+            {discountPercent > 0 && <> · Slab {slab} discount ({discountPercent}%): −{money(discountAmount)}</>}
+            {gstEnabled && <> · CGST+SGST (18%): {money(gstAmount)}</>}
+            {transportNum > 0 && <> · Transport: {money(transportNum)}</>}
+            <br />
+            <strong style={{ color: 'var(--text)', fontSize: 16 }}>Total: {money(grandTotal)}</strong>
           </div>
         </div>
 

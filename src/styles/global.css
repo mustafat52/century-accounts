@@ -408,6 +408,21 @@ tbody tr:hover { background: var(--surface-2); }
 
 .two-col { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; align-items: start; }
 
+/* Standalone search inputs (Customers/Vendors/Invoicing list search) — same
+   look as .form-field input, but usable outside a .form-field wrapper,
+   e.g. sitting inline in a .panel-head next to buttons. */
+.search-input {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text);
+  min-width: 220px;
+}
+.search-input:focus { outline: none; border-color: var(--gold); }
+.search-input::placeholder { color: var(--text-muted); }
+
 .chip-row { display: flex; gap: 8px; margin-bottom: 16px; }
 .chip {
   padding: 6px 14px;
