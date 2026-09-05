@@ -319,6 +319,10 @@ tbody tr:hover { background: var(--surface-2); }
 .badge.overdue::before { background: var(--danger); }
 .badge.in_progress { background: var(--info-dim); color: var(--info); }
 .badge.in_progress::before { background: var(--info); }
+.badge.converted { background: var(--info-dim); color: var(--info); }
+.badge.converted::before { background: var(--info); }
+.badge.expired { background: var(--surface-2); color: var(--text-muted); }
+.badge.expired::before { background: var(--text-muted); }
 .badge.partial { background: var(--partial-dim); color: var(--partial); }
 .badge.partial::before { background: var(--partial); }
 

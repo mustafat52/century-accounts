@@ -50,33 +50,35 @@ export default function Reports() {
     return { revenue, expenses: exp, profit: revenue - exp };
   }, [chartData]);
 
-  const periodInvoices = useMemo(() => invoices.filter((i) => i.date >= start), [invoices, start]);
   const periodExpenses = useMemo(() => expenses.filter((e) => e.date >= start), [expenses, start]);
   const periodQuotations = useMemo(() => quotations.filter((q) => q.date >= start), [quotations, start]);
 
-  const invoiceStatusBreakdown = useMemo(() => {
+  // Quotations are the live source of "business generated this period" now
+  // — a quotation exists (and is worth counting) the moment it's created,
+  // long before it's ever settled into an invoice.
+  const quotationStatusBreakdown = useMemo(() => {
     const buckets: Record<string, { count: number; amount: number }> = {
-      in_progress: { count: 0, amount: 0 },
-      paid: { count: 0, amount: 0 },
       due: { count: 0, amount: 0 },
       overdue: { count: 0, amount: 0 },
-      partial: { count: 0, amount: 0 },
+      paid: { count: 0, amount: 0 },
+      converted: { count: 0, amount: 0 },
+      expired: { count: 0, amount: 0 },
     };
-    periodInvoices.forEach((i) => {
-      buckets[i.status].count += 1;
-      buckets[i.status].amount += i.amount - i.discountAmount + i.gst + i.transportation;
+    periodQuotations.forEach((q) => {
+      buckets[q.effectiveStatus].count += 1;
+      buckets[q.effectiveStatus].amount += q.grandTotal;
     });
     return buckets;
-  }, [periodInvoices]);
+  }, [periodQuotations]);
 
   const topCustomers = useMemo(() => {
     const map = new Map<string, number>();
-    periodInvoices.forEach((i) => map.set(i.customerId, (map.get(i.customerId) ?? 0) + i.amount - i.discountAmount + i.gst + i.transportation));
+    periodQuotations.forEach((q) => map.set(q.customerId, (map.get(q.customerId) ?? 0) + q.grandTotal));
     return Array.from(map.entries())
       .map(([id, amount]) => ({ name: customers.find((c) => c.id === id)?.name ?? '—', amount }))
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 5);
-  }, [periodInvoices, customers]);
+  }, [periodQuotations, customers]);
 
   const expenseByCategory = useMemo(() => {
     const map = new Map<string, number>();
@@ -118,32 +120,31 @@ export default function Reports() {
       C: { count: 0, customers: new Set(), amount: 0 },
       D: { count: 0, customers: new Set(), amount: 0 },
     };
-    periodInvoices.forEach((i) => {
-      const b = buckets[i.slab];
+    periodQuotations.forEach((q) => {
+      const b = buckets[q.slab];
       b.count += 1;
-      b.customers.add(i.customerId);
-      b.amount += i.amount - i.discountAmount + i.gst + i.transportation;
+      b.customers.add(q.customerId);
+      b.amount += q.grandTotal;
     });
     return (['A', 'B', 'C', 'D'] as InvoiceSlab[]).map((slab) => ({
       slab,
-      percentLabel: slab === 'D' ? 'custom %' : `${SLAB_DISCOUNT_PERCENT[slab]}%`,
+      percentLabel: slab === 'A' ? 'custom %' : `${SLAB_DISCOUNT_PERCENT[slab]}%`,
       invoiceCount: buckets[slab].count,
       customerCount: buckets[slab].customers.size,
       amount: buckets[slab].amount,
     }));
-  }, [periodInvoices]);
+  }, [periodQuotations]);
 
   const gstSplit = useMemo(() => {
     const withGst = { count: 0, amount: 0 };
     const withoutGst = { count: 0, amount: 0 };
-    periodInvoices.forEach((i) => {
-      const total = i.amount - i.discountAmount + i.gst + i.transportation;
-      const bucket = i.gst > 0 ? withGst : withoutGst;
+    periodQuotations.forEach((q) => {
+      const bucket = q.gst > 0 ? withGst : withoutGst;
       bucket.count += 1;
-      bucket.amount += total;
+      bucket.amount += q.grandTotal;
     });
     return { withGst, withoutGst };
-  }, [periodInvoices]);
+  }, [periodQuotations]);
 
   const totalReceivable = customers.reduce((sum, c) => sum + c.outstanding, 0);
   const totalPayable = vendors.reduce((sum, v) => sum + v.payable, 0);
@@ -207,7 +208,7 @@ export default function Reports() {
         <div className="two-col">
           <div className="panel">
             <div className="panel-head">
-              <h3>Invoice status — {periodLabel.toLowerCase()}</h3>
+              <h3>Quotation status — {periodLabel.toLowerCase()}</h3>
             </div>
             <table>
               <thead>
@@ -219,29 +220,29 @@ export default function Reports() {
               </thead>
               <tbody>
                 <tr>
-                  <td><span className="badge in_progress">In Progress</span></td>
-                  <td className="num">{invoiceStatusBreakdown.in_progress.count}</td>
-                  <td className="num">{formatINR(invoiceStatusBreakdown.in_progress.amount)}</td>
-                </tr>
-                <tr>
                   <td><span className="badge due">Due</span></td>
-                  <td className="num">{invoiceStatusBreakdown.due.count}</td>
-                  <td className="num">{formatINR(invoiceStatusBreakdown.due.amount)}</td>
+                  <td className="num">{quotationStatusBreakdown.due.count}</td>
+                  <td className="num">{formatINR(quotationStatusBreakdown.due.amount)}</td>
                 </tr>
                 <tr>
                   <td><span className="badge overdue">Overdue</span></td>
-                  <td className="num">{invoiceStatusBreakdown.overdue.count}</td>
-                  <td className="num">{formatINR(invoiceStatusBreakdown.overdue.amount)}</td>
+                  <td className="num">{quotationStatusBreakdown.overdue.count}</td>
+                  <td className="num">{formatINR(quotationStatusBreakdown.overdue.amount)}</td>
                 </tr>
                 <tr>
-                  <td><span className="badge partial">Partial</span></td>
-                  <td className="num">{invoiceStatusBreakdown.partial.count}</td>
-                  <td className="num">{formatINR(invoiceStatusBreakdown.partial.amount)}</td>
+                  <td><span className="badge paid">Fully Paid</span></td>
+                  <td className="num">{quotationStatusBreakdown.paid.count}</td>
+                  <td className="num">{formatINR(quotationStatusBreakdown.paid.amount)}</td>
                 </tr>
                 <tr>
-                  <td><span className="badge paid">Paid</span></td>
-                  <td className="num">{invoiceStatusBreakdown.paid.count}</td>
-                  <td className="num">{formatINR(invoiceStatusBreakdown.paid.amount)}</td>
+                  <td><span className="badge converted">Invoiced</span></td>
+                  <td className="num">{quotationStatusBreakdown.converted.count}</td>
+                  <td className="num">{formatINR(quotationStatusBreakdown.converted.amount)}</td>
+                </tr>
+                <tr>
+                  <td><span className="badge expired">Expired</span></td>
+                  <td className="num">{quotationStatusBreakdown.expired.count}</td>
+                  <td className="num">{formatINR(quotationStatusBreakdown.expired.amount)}</td>
                 </tr>
               </tbody>
             </table>
@@ -261,7 +262,7 @@ export default function Reports() {
                 ))}
                 {topCustomers.length === 0 && (
                   <tr>
-                    <td className="row-sub">No invoices in this period.</td>
+                    <td className="row-sub">No quotations in this period.</td>
                   </tr>
                 )}
               </tbody>
@@ -343,7 +344,7 @@ export default function Reports() {
               <thead>
                 <tr>
                   <th>Slab</th>
-                  <th>Invoices</th>
+                  <th>Quotations</th>
                   <th>Customers</th>
                   <th>Business</th>
                 </tr>
@@ -357,9 +358,9 @@ export default function Reports() {
                     <td className="num">{formatINR(s.amount)}</td>
                   </tr>
                 ))}
-                {periodInvoices.length === 0 && (
+                {periodQuotations.length === 0 && (
                   <tr>
-                    <td className="row-sub">No invoices in this period.</td>
+                    <td className="row-sub">No quotations in this period.</td>
                   </tr>
                 )}
               </tbody>
@@ -374,12 +375,12 @@ export default function Reports() {
               <div className="facet-card">
                 <div className="stat-label">With GST</div>
                 <div className="stat-value num">{formatINR(gstSplit.withGst.amount)}</div>
-                <div className="stat-delta">{gstSplit.withGst.count} invoice{gstSplit.withGst.count === 1 ? '' : 's'}</div>
+                <div className="stat-delta">{gstSplit.withGst.count} quotation{gstSplit.withGst.count === 1 ? '' : 's'}</div>
               </div>
               <div className="facet-card">
                 <div className="stat-label">Without GST</div>
                 <div className="stat-value num">{formatINR(gstSplit.withoutGst.amount)}</div>
-                <div className="stat-delta">{gstSplit.withoutGst.count} invoice{gstSplit.withoutGst.count === 1 ? '' : 's'}</div>
+                <div className="stat-delta">{gstSplit.withoutGst.count} quotation{gstSplit.withoutGst.count === 1 ? '' : 's'}</div>
               </div>
             </div>
           </div>

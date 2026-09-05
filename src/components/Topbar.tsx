@@ -4,14 +4,16 @@ interface TopbarProps {
   title: string;
   subtitle: string;
   // Only Dashboard and Invoicing pass this — every other page was
-  // inheriting these two buttons for free just by rendering Topbar at all,
-  // which made "New Quotation"/"+ New Invoice" show up on Vendors,
-  // Expenses, Purchase Bills, etc. where they don't belong.
+  // inheriting this button for free just by rendering Topbar at all,
+  // which made "New Quotation" show up on Vendors, Expenses, Purchase
+  // Bills, etc. where it doesn't belong.
   showInvoiceActions?: boolean;
 }
 
+// "New Invoice" is gone for good — invoices are never created directly
+// anymore, only via converting a fully-paid quotation (see Invoicing.tsx).
 export default function Topbar({ title, subtitle, showInvoiceActions = false }: TopbarProps) {
-  const { openInvoiceModal, openQuotationModal } = useApp();
+  const { openQuotationModal } = useApp();
 
   return (
     <header className="topbar">
@@ -21,11 +23,8 @@ export default function Topbar({ title, subtitle, showInvoiceActions = false }: 
       </div>
       {showInvoiceActions && (
         <div className="topbar-actions desktop-only">
-          <button className="btn btn-ghost" onClick={() => openQuotationModal()}>
-            New Quotation
-          </button>
-          <button className="btn btn-primary" onClick={() => openInvoiceModal()}>
-            + New Invoice
+          <button className="btn btn-primary" onClick={() => openQuotationModal()}>
+            + New Quotation
           </button>
         </div>
       )}

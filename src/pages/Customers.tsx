@@ -16,13 +16,21 @@ function CustomerDetailModal({
   customer: Customer | null;
   onClose: () => void;
 }) {
-  const { invoices, openInvoiceModal, openPrint, openPaymentModal, openEditCustomerModal } = useApp();
+  const { invoices, quotations, quotationPayments, openQuotationModal, openPrint, openPaymentModal, openEditCustomerModal } = useApp();
 
   if (!customer) return null;
 
-  const history = invoices
+  // A combined timeline: active quotations (the live bill, still being
+  // paid down) and settled invoices (the terminal, paid-in-full record).
+  // Every invoice already came from one of this customer's quotations, so
+  // together this is the complete purchase history.
+  const quotationRows = quotations
+    .filter((q) => q.customerId === customer.id && q.status !== 'converted')
+    .map((q) => ({ kind: 'quotation' as const, date: q.date, quotation: q }));
+  const invoiceRows = invoices
     .filter((i) => i.customerId === customer.id)
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
+    .map((i) => ({ kind: 'invoice' as const, date: i.date, invoice: i }));
+  const history = [...quotationRows, ...invoiceRows].sort((a, b) => (a.date < b.date ? 1 : -1));
 
   return (
     <div className="modal-overlay is-open">
@@ -40,7 +48,7 @@ function CustomerDetailModal({
             <p className="row-sub">{customer.contact}</p>
             {customer.address && <p className="row-sub">{customer.address}</p>}
             <p className="row-sub">
-              Total purchased: <span className="num">{formatINR(customer.totalBilled)}</span>
+              Active quotations: <span className="num">{formatINR(customer.totalBilled)}</span>
               {'  ·  '}
               Outstanding:{' '}
               <span className="num" style={{ color: customer.outstanding > 0 ? 'var(--warning)' : 'var(--success)' }}>
@@ -58,7 +66,7 @@ function CustomerDetailModal({
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th>Invoice</th>
+                  <th>Bill</th>
                   <th>What was purchased</th>
                   <th>Amount</th>
                   <th>Status</th>
@@ -66,55 +74,100 @@ function CustomerDetailModal({
                 </tr>
               </thead>
               <tbody>
-                {history.map((i) => (
-                  <tr key={i.id}>
-                    <td className="row-sub">{i.date}</td>
-                    <td>
-                      <button
-                        className="row-name"
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          padding: 0,
-                          cursor: 'pointer',
-                          color: 'var(--gold-bright)',
-                          textDecoration: 'underline',
-                          textUnderlineOffset: 2,
-                        }}
-                        onClick={() => openPrint('invoice', i.id)}
-                        title="Open this invoice"
-                      >
-                        {i.id}
-                      </button>
-                      <div className="row-sub">{i.kind === 'job' ? 'Job order' : 'Quick sale'}</div>
-                    </td>
-                    <td className="row-sub">{i.description}</td>
-                    <td className="num">
-                      {formatINR(i.amount - i.discountAmount + i.gst + i.transportation)}
-                      {i.gst > 0 && <div className="row-sub">incl. {formatINR(i.gst)} GST</div>}
-                      {i.transportation > 0 && <div className="row-sub">+ {formatINR(i.transportation)} transport</div>}
-                    </td>
-                    <td>
-                      <StatusBadge status={i.status} />
-                    </td>
-                    <td style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <button className="btn btn-ghost btn-small" onClick={() => openPrint('invoice', i.id)}>
-                        Print
-                      </button>
-                      {i.status !== 'in_progress' && i.status !== 'paid' && (
-                        <button className="btn btn-ghost btn-small desktop-only" onClick={() => openPaymentModal(i.dbId)}>
-                          Record Payment
+                {history.map((row) => {
+                  if (row.kind === 'invoice') {
+                    const i = row.invoice;
+                    return (
+                      <tr key={`inv-${i.id}`}>
+                        <td className="row-sub">{i.date}</td>
+                        <td>
+                          <button
+                            className="row-name"
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              cursor: 'pointer',
+                              color: 'var(--gold-bright)',
+                              textDecoration: 'underline',
+                              textUnderlineOffset: 2,
+                            }}
+                            onClick={() => openPrint('invoice', i.id)}
+                            title="Open this invoice"
+                          >
+                            {i.id}
+                          </button>
+                        </td>
+                        <td className="row-sub">{i.description}</td>
+                        <td className="num">
+                          {formatINR(i.amount - i.discountAmount + i.gst + i.transportation)}
+                          {i.gst > 0 && <div className="row-sub">incl. {formatINR(i.gst)} GST</div>}
+                          {i.transportation > 0 && <div className="row-sub">+ {formatINR(i.transportation)} transport</div>}
+                        </td>
+                        <td>
+                          <StatusBadge status="converted" />
+                        </td>
+                        <td>
+                          <button className="btn btn-ghost btn-small" onClick={() => openPrint('invoice', i.id)}>
+                            Print
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  }
+                  const q = row.quotation;
+                  return (
+                    <tr key={`quo-${q.id}`}>
+                      <td className="row-sub">{q.date}</td>
+                      <td>
+                        <button
+                          className="row-name"
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            padding: 0,
+                            cursor: 'pointer',
+                            color: 'var(--gold-bright)',
+                            textDecoration: 'underline',
+                            textUnderlineOffset: 2,
+                          }}
+                          onClick={() => openPrint('quotation', q.id)}
+                          title="Open this quotation"
+                        >
+                          {q.id}
                         </button>
-                      )}
-                      {(i.status === 'due' || i.status === 'overdue' || i.status === 'partial') && (
-                        <CopyReminderButton invoice={i} customerName={customer.name} />
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="row-sub">{q.description}</td>
+                      <td className="num">
+                        {formatINR(q.grandTotal)}
+                        {q.gst > 0 && <div className="row-sub">incl. {formatINR(q.gst)} GST</div>}
+                        {q.transportation > 0 && <div className="row-sub">+ {formatINR(q.transportation)} transport</div>}
+                        {q.paidAmount > 0 && q.effectiveStatus !== 'paid' && (
+                          <div className="row-sub">{formatINR(q.paidAmount)} paid so far</div>
+                        )}
+                      </td>
+                      <td>
+                        <StatusBadge status={q.effectiveStatus} showPartial={q.paidAmount > 0 && q.balanceAmount > 0} />
+                      </td>
+                      <td style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <button className="btn btn-ghost btn-small" onClick={() => openPrint('quotation', q.id)}>
+                          Print
+                        </button>
+                        {q.balanceAmount > 0 && (
+                          <button className="btn btn-ghost btn-small desktop-only" onClick={() => openPaymentModal(q.dbId)}>
+                            Record Payment
+                          </button>
+                        )}
+                        {(q.effectiveStatus === 'due' || q.effectiveStatus === 'overdue') && (
+                          <CopyReminderButton quotation={q} customerName={customer.name} />
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
                 {history.length === 0 && (
                   <tr>
-                    <td className="row-sub">No invoices yet.</td>
+                    <td className="row-sub">No bills yet.</td>
                   </tr>
                 )}
               </tbody>
@@ -135,10 +188,10 @@ function CustomerDetailModal({
           >
             Edit
           </button>
-          <button className="btn btn-ghost" onClick={() => exportCustomerLedger(customer, invoices)}>
+          <button className="btn btn-ghost" onClick={() => exportCustomerLedger(customer, invoices, quotations, quotationPayments)}>
             Export (Excel)
           </button>
-          <button className="btn btn-primary desktop-only" onClick={() => openInvoiceModal(customer.id)}>
+          <button className="btn btn-primary desktop-only" onClick={() => openQuotationModal(customer.id)}>
             + New Bill
           </button>
         </div>
@@ -148,7 +201,7 @@ function CustomerDetailModal({
 }
 
 export default function Customers() {
-  const { customers, invoices, openCustomerModal } = useApp();
+  const { customers, invoices, quotations, quotationPayments, openCustomerModal } = useApp();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
@@ -176,7 +229,7 @@ export default function Customers() {
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search customers…"
               />
-              <button className="btn btn-ghost btn-small" onClick={() => exportAllCustomersLedger(customers, invoices)}>
+              <button className="btn btn-ghost btn-small" onClick={() => exportAllCustomersLedger(customers, invoices, quotations, quotationPayments)}>
                 Export All (Excel)
               </button>
               <button className="btn btn-ghost btn-small desktop-only" onClick={openCustomerModal}>
@@ -188,7 +241,7 @@ export default function Customers() {
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Total billed</th>
+                <th>Active quoted</th>
                 <th>Outstanding</th>
               </tr>
             </thead>

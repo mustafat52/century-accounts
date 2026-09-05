@@ -7,15 +7,20 @@ import CopyReminderButton from '../components/CopyReminderButton';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useApp } from '../context/AppContext';
 import { formatINR } from '../utils/format';
-import type { Invoice, InvoiceStatus, Quotation } from '../types';
+import type { Invoice, QuotationEffectiveStatus, Quotation } from '../types';
 
-const STATUS_FILTERS: Array<{ key: InvoiceStatus | 'all'; label: string }> = [
+// 'partial' isn't a real effectiveStatus value (see types.ts) — it's a
+// filter layered on top, matching any quotation with 0 < paidAmount <
+// grandTotal regardless of whether it's also due or overdue.
+type QuotationFilter = QuotationEffectiveStatus | 'partial' | 'all';
+
+const STATUS_FILTERS: Array<{ key: QuotationFilter; label: string }> = [
   { key: 'all', label: 'All' },
-  { key: 'in_progress', label: 'In Progress' },
   { key: 'due', label: 'Due' },
   { key: 'overdue', label: 'Overdue' },
   { key: 'partial', label: 'Partial' },
   { key: 'paid', label: 'Paid' },
+  { key: 'expired', label: 'Expired' },
 ];
 
 export default function Invoicing() {
@@ -24,25 +29,25 @@ export default function Invoicing() {
     quotations,
     customers,
     openPrint,
-    openConvertQuotationModal,
     openEditQuotationModal,
-    markJobCompleted,
+    convertQuotationToInvoice,
     openPaymentModal,
-    deleteInvoice,
+    rollbackInvoiceToQuotation,
     deleteQuotation,
   } = useApp();
-  const [deleteInvoiceTarget, setDeleteInvoiceTarget] = useState<Invoice | null>(null);
+  const [rollbackTarget, setRollbackTarget] = useState<Invoice | null>(null);
   const [deleteQuotationTarget, setDeleteQuotationTarget] = useState<Quotation | null>(null);
   const [search, setSearch] = useState('');
-  // URL-driven (not local state) so converting a quotation from anywhere —
-  // the table row, or the print preview overlay — can land the user back
-  // on the Invoices tab via navigate('/invoicing?tab=invoices'), even
-  // though this component doesn't unmount in between.
+  // URL-driven (not local state) so the tab survives navigation from
+  // elsewhere (e.g. Customers' "New Bill" or the print preview overlay).
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab: 'invoices' | 'quotations' = searchParams.get('tab') === 'quotations' ? 'quotations' : 'invoices';
-  const setTab = (t: 'invoices' | 'quotations') => setSearchParams(t === 'invoices' ? {} : { tab: t });
-  const filter = (searchParams.get('status') as InvoiceStatus | 'all') || 'all';
-  const setFilter = (f: InvoiceStatus | 'all') => {
+  // Quotations is the default tab now — it's where all the live work
+  // (payments, due/overdue, convert) actually happens. Invoices is just a
+  // read-only archive of already-settled bills.
+  const tab: 'invoices' | 'quotations' = searchParams.get('tab') === 'invoices' ? 'invoices' : 'quotations';
+  const setTab = (t: 'invoices' | 'quotations') => setSearchParams(t === 'quotations' ? {} : { tab: t });
+  const filter = (searchParams.get('status') as QuotationFilter) || 'all';
+  const setFilter = (f: QuotationFilter) => {
     const next = new URLSearchParams(searchParams);
     if (f === 'all') next.delete('status');
     else next.set('status', f);
@@ -63,35 +68,40 @@ export default function Invoicing() {
     customerName(custId).toLowerCase().includes(query) ||
     description.toLowerCase().includes(query);
 
-  const filteredInvoices = useMemo(
+  const sortedInvoices = useMemo(
     () =>
-      (filter === 'all' ? invoices : invoices.filter((i) => i.status === filter)).filter((i) =>
-        matchesSearch(i.id, i.customerId, i.description)
-      ),
+      [...invoices]
+        .filter((i) => matchesSearch(i.id, i.customerId, i.description))
+        .sort((a, b) => (a.date < b.date ? 1 : -1)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [invoices, filter, query, customers]
+    [invoices, query, customers]
   );
 
-  const sortedQuotations = useMemo(
+  const filteredQuotations = useMemo(
     () =>
       [...quotations]
+        .filter((q) => {
+          if (filter === 'all') return true;
+          if (filter === 'partial') return q.paidAmount > 0 && q.balanceAmount > 0;
+          return q.effectiveStatus === filter;
+        })
         .filter((q) => matchesSearch(q.id, q.customerId, q.description))
         .sort((a, b) => (a.date < b.date ? 1 : -1)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [quotations, query, customers]
+    [quotations, filter, query, customers]
   );
 
   return (
     <>
-      <Topbar title="Invoicing" subtitle="Quick sales, job-order invoices, and quotations — in one place" showInvoiceActions />
+      <Topbar title="Invoicing" subtitle="Quotations carry every job from creation to full payment" showInvoiceActions />
       <div className="view-body">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <div className="chip-row" style={{ marginBottom: 0 }}>
-            <button className={`chip${tab === 'invoices' ? ' is-active' : ''}`} onClick={() => setTab('invoices')}>
-              Invoices
-            </button>
             <button className={`chip${tab === 'quotations' ? ' is-active' : ''}`} onClick={() => setTab('quotations')}>
               Quotations
+            </button>
+            <button className={`chip${tab === 'invoices' ? ' is-active' : ''}`} onClick={() => setTab('invoices')}>
+              Invoices (settled)
             </button>
           </div>
           <input
@@ -99,11 +109,11 @@ export default function Invoicing() {
             className="search-input"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by customer, invoice # or description…"
+            placeholder="Search by customer, number or description…"
           />
         </div>
 
-        {tab === 'invoices' && (
+        {tab === 'quotations' && (
           <>
             <div className="chip-row">
               {STATUS_FILTERS.map((f) => (
@@ -120,82 +130,83 @@ export default function Invoicing() {
             <div className="panel">
               <div className="panel-head">
                 <h3>
-                  {filteredInvoices.length} invoice{filteredInvoices.length !== 1 ? 's' : ''}
+                  {filteredQuotations.length} quotation{filteredQuotations.length !== 1 ? 's' : ''}
                 </h3>
               </div>
               <table>
                 <thead>
                   <tr>
-                    <th>Invoice</th>
+                    <th>Quotation</th>
                     <th>Customer</th>
-                    <th>Type</th>
                     <th>Description</th>
                     <th>Amount</th>
-                    <th>Due / Status</th>
                     <th>Status</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredInvoices.length === 0 && (
+                  {filteredQuotations.length === 0 && (
                     <tr>
-                      <td className="row-sub">{query ? `No invoices match “${search}”.` : 'No invoices yet.'}</td>
+                      <td className="row-sub">{query ? `No quotations match “${search}”.` : 'No quotations yet.'}</td>
                     </tr>
                   )}
-                  {filteredInvoices.map((i) => (
-                    <tr key={i.id}>
-                      <td>{i.id}</td>
-                      <td>{customerName(i.customerId)}</td>
-                      <td className="row-sub">
-                        {i.kind === 'job' ? 'Job order' : 'Quick sale'}
-                        {i.items.length > 1 && <div className="row-sub">{i.items.length} items</div>}
-                      </td>
-                      <td className="row-sub">{i.description}</td>
+                  {filteredQuotations.map((q) => (
+                    <tr key={q.id}>
+                      <td>{q.id}</td>
+                      <td>{customerName(q.customerId)}</td>
+                      <td className="row-sub">{q.description}</td>
                       <td className="num">
-                        {formatINR(i.amount - i.discountAmount + i.gst + i.transportation)}
-                        {i.gst > 0 && (
+                        {formatINR(q.grandTotal)}
+                        {q.discountAmount > 0 && (
                           <div className="row-sub">
-                            CGST {formatINR(i.gst / 2)} + SGST {formatINR(i.gst / 2)}
+                            Slab {q.slab} · −{formatINR(q.discountAmount)}
                           </div>
                         )}
-                        {i.transportation > 0 && <div className="row-sub">+ Transport {formatINR(i.transportation)}</div>}
-                        {i.paidAmount > 0 && i.status !== 'paid' && (
-                          <div className="row-sub">Paid {formatINR(i.paidAmount)} · Bal {formatINR(i.balance)}</div>
+                        {q.gst > 0 && <div className="row-sub">incl. {formatINR(q.gst)} GST</div>}
+                        {q.transportation > 0 && <div className="row-sub">+ Transport {formatINR(q.transportation)}</div>}
+                        {q.paidAmount > 0 && q.balanceAmount > 0 && (
+                          <div className="row-sub">Paid {formatINR(q.paidAmount)} · Bal {formatINR(q.balanceAmount)}</div>
                         )}
                       </td>
-                      <td className="row-sub">{i.dueDate ?? '—'}</td>
                       <td>
-                        <StatusBadge status={i.status} />
+                        <StatusBadge status={q.effectiveStatus} showPartial={q.paidAmount > 0 && q.balanceAmount > 0} />
                       </td>
                       <td style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <button className="btn btn-ghost btn-small" onClick={() => openPrint('invoice', i.id)}>
-                          Print
+                        <button className="btn btn-ghost btn-small" onClick={() => openPrint('quotation', q.id)}>
+                          Quotation
                         </button>
-                        {i.status === 'in_progress' && (
-                          <button
-                            className="btn btn-primary btn-small desktop-only"
-                            onClick={() => markJobCompleted(i.dbId)}
-                          >
-                            Mark Completed
-                          </button>
-                        )}
-                        {i.status !== 'in_progress' && i.status !== 'paid' && (
+                        <button className="btn btn-ghost btn-small" onClick={() => openPrint('ledger', q.id)}>
+                          Ledger
+                        </button>
+                        {q.status === 'pending' && (
                           <button
                             className="btn btn-ghost btn-small desktop-only"
-                            onClick={() => openPaymentModal(i.dbId)}
+                            onClick={() => openEditQuotationModal(q.dbId)}
                           >
+                            Edit
+                          </button>
+                        )}
+                        {q.status === 'pending' && q.balanceAmount > 0 && (
+                          <button className="btn btn-ghost btn-small desktop-only" onClick={() => openPaymentModal(q.dbId)}>
                             Record Payment
                           </button>
                         )}
-                        {(i.status === 'due' || i.status === 'overdue' || i.status === 'partial') && (
-                          <CopyReminderButton invoice={i} customerName={customerName(i.customerId)} />
+                        {q.status === 'pending' && q.balanceAmount <= 0 && (
+                          <button
+                            className="btn btn-primary btn-small desktop-only"
+                            onClick={() => convertQuotationToInvoice(q.dbId)}
+                          >
+                            Convert to Invoice
+                          </button>
                         )}
-                        <button
-                          className="btn btn-ghost btn-small desktop-only"
-                          onClick={() => setDeleteInvoiceTarget(i)}
-                        >
-                          Delete
-                        </button>
+                        {(q.effectiveStatus === 'due' || q.effectiveStatus === 'overdue') && (
+                          <CopyReminderButton quotation={q} customerName={customerName(q.customerId)} />
+                        )}
+                        {q.status === 'pending' && q.paidAmount === 0 && (
+                          <button className="btn btn-ghost btn-small desktop-only" onClick={() => setDeleteQuotationTarget(q)}>
+                            Delete
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -205,80 +216,60 @@ export default function Invoicing() {
           </>
         )}
 
-        {tab === 'quotations' && (
+        {tab === 'invoices' && (
           <div className="panel">
             <div className="panel-head">
               <h3>
-                {sortedQuotations.length} quotation{sortedQuotations.length !== 1 ? 's' : ''}
+                {sortedInvoices.length} invoice{sortedInvoices.length !== 1 ? 's' : ''}
               </h3>
             </div>
             <table>
               <thead>
                 <tr>
-                  <th>Quotation</th>
+                  <th>Invoice</th>
                   <th>Customer</th>
                   <th>Description</th>
                   <th>Amount</th>
-                  <th>Valid until</th>
-                  <th>Status</th>
+                  <th>Date</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {sortedQuotations.map((q) => (
-                  <tr key={q.id}>
-                    <td>{q.id}</td>
-                    <td>{customerName(q.customerId)}</td>
-                    <td className="row-sub">{q.description}</td>
+                {sortedInvoices.length === 0 && (
+                  <tr>
+                    <td className="row-sub">{query ? `No invoices match “${search}”.` : 'No invoices yet — a quotation becomes one once it\'s fully paid.'}</td>
+                  </tr>
+                )}
+                {sortedInvoices.map((i) => (
+                  <tr key={i.id}>
+                    <td>{i.id}</td>
+                    <td>{customerName(i.customerId)}</td>
+                    <td className="row-sub">
+                      {i.description}
+                      {i.items.length > 1 && <div className="row-sub">{i.items.length} items</div>}
+                    </td>
                     <td className="num">
-                      {formatINR(q.amount - q.discountAmount + q.gst + q.transportation)}
-                      {q.discountAmount > 0 && (
+                      {formatINR(i.amount - i.discountAmount + i.gst + i.transportation)}
+                      {i.gst > 0 && (
                         <div className="row-sub">
-                          Slab {q.slab} · −{formatINR(q.discountAmount)}
+                          CGST {formatINR(i.gst / 2)} + SGST {formatINR(i.gst / 2)}
                         </div>
                       )}
-                      {q.gst > 0 && <div className="row-sub">incl. {formatINR(q.gst)} GST</div>}
-                      {q.transportation > 0 && <div className="row-sub">+ Transport {formatINR(q.transportation)}</div>}
+                      {i.transportation > 0 && <div className="row-sub">+ Transport {formatINR(i.transportation)}</div>}
                     </td>
-                    <td className="row-sub">{q.validUntil}</td>
-                    <td>
-                      <span className={`badge ${q.status === 'pending' ? 'due' : q.status === 'converted' ? 'paid' : 'overdue'}`}>
-                        {q.status === 'pending' ? 'Pending' : q.status === 'converted' ? 'Converted' : 'Expired'}
-                      </span>
-                    </td>
-                    <td style={{ display: 'flex', gap: 8 }}>
-                      <button className="btn btn-ghost btn-small" onClick={() => openPrint('quotation', q.id)}>
+                    <td className="row-sub">{i.date}</td>
+                    <td style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button className="btn btn-ghost btn-small" onClick={() => openPrint('invoice', i.id)}>
                         Print
                       </button>
-                      {q.status === 'pending' && (
-                        <>
-                          <button
-                            className="btn btn-ghost btn-small desktop-only"
-                            onClick={() => openEditQuotationModal(q.dbId)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="btn btn-primary btn-small desktop-only"
-                            onClick={() => openConvertQuotationModal(q.dbId)}
-                          >
-                            Convert
-                          </button>
-                        </>
-                      )}
-                      {q.status !== 'converted' && (
-                        <button className="btn btn-ghost btn-small desktop-only" onClick={() => setDeleteQuotationTarget(q)}>
-                          Delete
+                      {i.sourceQuotationId && (
+                        <button className="btn btn-ghost btn-small desktop-only" onClick={() => setRollbackTarget(i)}>
+                          Roll back to Quotation
                         </button>
                       )}
                     </td>
                   </tr>
                 ))}
-                {sortedQuotations.length === 0 && (
-                  <tr>
-                    <td className="row-sub">{query ? `No quotations match “${search}”.` : 'No quotations yet.'}</td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>
@@ -286,16 +277,16 @@ export default function Invoicing() {
       </div>
       <PaymentModal />
       <ConfirmDialog
-        open={deleteInvoiceTarget !== null}
-        title="Delete invoice?"
-        message={`Delete ${deleteInvoiceTarget?.id}? It will be removed from all lists and customer records — but any revenue already recorded from it stays in your monthly figures and reports.`}
-        confirmLabel="Delete"
+        open={rollbackTarget !== null}
+        title="Roll back to quotation?"
+        message={`This deletes ${rollbackTarget?.id} completely and reopens its source quotation as pending — its payment history stays exactly as it is, so nothing recorded is lost. Use this only to fix a mistake found after settlement.`}
+        confirmLabel="Roll back"
         danger
         onConfirm={async () => {
-          if (deleteInvoiceTarget) await deleteInvoice(deleteInvoiceTarget.dbId);
-          setDeleteInvoiceTarget(null);
+          if (rollbackTarget) await rollbackInvoiceToQuotation(rollbackTarget.dbId);
+          setRollbackTarget(null);
         }}
-        onCancel={() => setDeleteInvoiceTarget(null)}
+        onCancel={() => setRollbackTarget(null)}
       />
       <ConfirmDialog
         open={deleteQuotationTarget !== null}

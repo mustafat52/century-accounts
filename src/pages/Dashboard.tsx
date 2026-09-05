@@ -6,13 +6,22 @@ import StatusBadge from '../components/StatusBadge';
 import { useApp } from '../context/AppContext';
 import { formatINR } from '../utils/format';
 
+// The 30-day due/overdue clock always runs from the quotation's creation
+// date — same rule as quotations_effective in schema.sql, computed here
+// purely for the "due X" display text.
+function dueDateFor(dateStr: string): string {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + 30);
+  return d.toISOString().slice(0, 10);
+}
+
 export default function Dashboard() {
-  const { invoices, customers, vendors, monthlyFigures, dashboardSummary } = useApp();
+  const { invoices, quotations, customers, vendors, monthlyFigures, dashboardSummary } = useApp();
 
   const stats = useMemo(() => {
     const outstandingReceivable = customers.reduce((sum, c) => sum + c.outstanding, 0);
     const outstandingPayable = vendors.reduce((sum, v) => sum + v.payable, 0);
-    const overdueCount = invoices.filter((i) => i.status === 'overdue').length;
+    const overdueCount = quotations.filter((q) => q.effectiveStatus === 'overdue').length;
     const thisMonth = monthlyFigures[monthlyFigures.length - 1];
     const lastMonth = monthlyFigures[monthlyFigures.length - 2];
     let revenueDelta: string | null = null;
@@ -25,9 +34,10 @@ export default function Dashboard() {
     }
 
     return { outstandingReceivable, outstandingPayable, overdueCount, thisMonth, revenueDelta };
-  }, [invoices, customers, vendors, monthlyFigures]);
+  }, [quotations, customers, vendors, monthlyFigures]);
 
   const recent = [...invoices].slice(0, 5);
+  const overdueQuotations = quotations.filter((q) => q.effectiveStatus === 'overdue');
   const customerName = (id: string) => customers.find((c) => c.id === id)?.name ?? '—';
 
   const revenueVsExpensePie = useMemo(() => {
@@ -63,7 +73,7 @@ export default function Dashboard() {
           <StatCard label="Outstanding receivables" value={formatINR(stats.outstandingReceivable)} />
           <StatCard label="Outstanding payables" value={formatINR(stats.outstandingPayable)} />
           <StatCard
-            label="Overdue invoices"
+            label="Overdue quotations"
             value={String(stats.overdueCount)}
             delta={stats.overdueCount > 0 ? 'Needs follow-up' : 'All clear'}
             deltaDirection={stats.overdueCount > 0 ? 'down' : 'up'}
@@ -72,9 +82,9 @@ export default function Dashboard() {
 
         <div className="section-title">This month's activity</div>
         <div className="stat-grid">
-          <StatCard label="Customers billed this month" value={String(dashboardSummary.customersBilledThisMonth)} />
-          <StatCard label="Jobs in progress" value={String(dashboardSummary.jobsInProgress)} />
-          <StatCard label="Jobs completed this month" value={String(dashboardSummary.jobsCompletedThisMonth)} />
+          <StatCard label="Customers paid this month" value={String(dashboardSummary.customersPaidThisMonth)} />
+          <StatCard label="Active quotations" value={String(dashboardSummary.quotationsActive)} />
+          <StatCard label="Jobs settled this month" value={String(dashboardSummary.jobsCompletedThisMonth)} />
         </div>
 
         <div className="two-col">
@@ -121,18 +131,16 @@ export default function Dashboard() {
             </div>
             <table>
               <tbody>
-                {invoices
-                  .filter((i) => i.status === 'overdue')
-                  .map((i) => (
-                    <tr key={i.id}>
-                      <td>
-                        <div className="row-name">{customerName(i.customerId)}</div>
-                        <div className="row-sub">{i.id} · due {i.dueDate}</div>
-                      </td>
-                      <td className="num">{formatINR(i.amount - i.discountAmount + i.gst + i.transportation)}</td>
-                    </tr>
-                  ))}
-                {invoices.filter((i) => i.status === 'overdue').length === 0 && (
+                {overdueQuotations.map((q) => (
+                  <tr key={q.id}>
+                    <td>
+                      <div className="row-name">{customerName(q.customerId)}</div>
+                      <div className="row-sub">{q.id} · due {dueDateFor(q.date)}</div>
+                    </td>
+                    <td className="num">{formatINR(q.balanceAmount)}</td>
+                  </tr>
+                ))}
+                {overdueQuotations.length === 0 && (
                   <tr>
                     <td className="row-sub">Nothing overdue right now.</td>
                   </tr>
@@ -164,10 +172,15 @@ export default function Dashboard() {
                   <td className="row-sub">{i.description}</td>
                   <td className="num">{formatINR(i.amount - i.discountAmount + i.gst + i.transportation)}</td>
                   <td>
-                    <StatusBadge status={i.status} />
+                    <StatusBadge status="converted" />
                   </td>
                 </tr>
               ))}
+              {recent.length === 0 && (
+                <tr>
+                  <td className="row-sub">No settled invoices yet.</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

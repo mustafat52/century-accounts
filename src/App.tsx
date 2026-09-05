@@ -4,9 +4,7 @@ import { InventoryProvider } from './context/InventoryContext';
 import Sidebar from './components/Sidebar';
 import MobileNav from './components/MobileNav';
 import InventorySidebar from './components/InventorySidebar';
-import InvoiceModal from './components/InvoiceModal';
 import QuotationModal from './components/QuotationModal';
-import ConvertQuotationModal from './components/ConvertQuotationModal';
 import PrintableDocument from './components/PrintableDocument';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -58,9 +56,7 @@ function ProtectedShell() {
           </Routes>
         )}
       </main>
-      <InvoiceModal />
       <QuotationModal />
-      <ConvertQuotationModal />
       <PrintableDocument />
     </div>
   );

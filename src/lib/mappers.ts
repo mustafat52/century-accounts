@@ -4,6 +4,7 @@ import type {
   Invoice,
   InvoiceItem,
   Quotation,
+  QuotationPayment,
   Expense,
   MonthlyFigure,
   ExpenseCategory,
@@ -16,6 +17,7 @@ import type {
   VendorSlipItem,
   PurchaseBill,
   PurchaseBillItem,
+  PaymentMethod,
 } from '../types';
 
 // These mirror the Supabase table/view column names (snake_case).
@@ -77,39 +79,15 @@ export function mapInvoiceItem(row: any): InvoiceItem {
 export const mapQuotationItem = mapInvoiceItem;
 
 // `items` must be pre-grouped by invoice_id and passed in (see AppContext).
+// An invoice is a terminal, read-only record now — no status/due
+// date/payment fields to map, since all of that lives on the source
+// quotation for as long as the job was active.
 export function mapInvoice(row: any, items: InvoiceItem[] = []): Invoice {
-  const amount = Number(row.amount);
-  const discountAmount = Number(row.discount_amount ?? 0);
-  const gst = Number(row.gst);
-  const transportation = Number(row.transportation ?? 0);
   return {
     id: row.invoice_no,
     dbId: row.id,
     customerId: row.customer_id,
-    kind: row.kind,
-    description: row.description,
-    amount,
-    slab: row.slab ?? 'A',
-    discountPercent: Number(row.discount_percent ?? 0),
-    discountAmount,
-    gst,
-    transportation,
-    date: row.invoice_date,
-    dueDate: row.due_date ?? null,
-    status: row.effective_status ?? row.status,
-    workStatus: row.work_status ?? null,
-    completedAt: row.completed_at ?? null,
-    paidAmount: Number(row.paid_amount ?? 0),
-    balance: Number(row.balance ?? (amount - discountAmount + gst + transportation)),
-    items,
-  };
-}
-
-export function mapQuotation(row: any): Quotation {
-  return {
-    id: row.quotation_no,
-    dbId: row.id,
-    customerId: row.customer_id,
+    sourceQuotationId: row.source_quotation_id ?? null,
     description: row.description,
     amount: Number(row.amount),
     slab: row.slab ?? 'A',
@@ -117,9 +95,46 @@ export function mapQuotation(row: any): Quotation {
     discountAmount: Number(row.discount_amount ?? 0),
     gst: Number(row.gst),
     transportation: Number(row.transportation ?? 0),
+    date: row.invoice_date,
+    items,
+  };
+}
+
+// Expects a row from the quotations_effective view (paid_amount,
+// grand_total, balance_amount, effective_status) — the live source of
+// truth for a quotation's payment/due-date standing.
+export function mapQuotation(row: any): Quotation {
+  return {
+    id: row.quotation_no,
+    dbId: row.id,
+    customerId: row.customer_id,
+    description: row.description,
+    amount: Number(row.amount),
+    slab: row.slab ?? 'D',
+    discountPercent: Number(row.discount_percent ?? 0),
+    discountAmount: Number(row.discount_amount ?? 0),
+    gst: Number(row.gst),
+    transportation: Number(row.transportation ?? 0),
     date: row.quotation_date,
     validUntil: row.valid_until,
     status: row.status,
+    convertedInvoiceId: row.converted_invoice_id ?? null,
+    grandTotal: Number(row.grand_total ?? row.amount),
+    paidAmount: Number(row.paid_amount ?? 0),
+    balanceAmount: Number(row.balance_amount ?? row.amount),
+    effectiveStatus: row.effective_status ?? row.status,
+  };
+}
+
+export function mapQuotationPayment(row: any): QuotationPayment {
+  return {
+    id: row.id,
+    quotationId: row.quotation_id,
+    amount: Number(row.amount),
+    paymentDate: row.payment_date,
+    method: row.method as PaymentMethod,
+    note: row.note ?? null,
+    createdAt: row.created_at,
   };
 }
 
@@ -163,8 +178,9 @@ export function mapImportantLink(row: any): ImportantLink {
 
 export function mapDashboardSummary(row: any): DashboardSummary {
   return {
-    customersBilledThisMonth: Number(row.customers_billed_this_month ?? 0),
-    jobsInProgress: Number(row.jobs_in_progress ?? 0),
+    customersPaidThisMonth: Number(row.customers_paid_this_month ?? 0),
+    quotationsActive: Number(row.quotations_active ?? 0),
+    quotationsOverdue: Number(row.quotations_overdue ?? 0),
     jobsCompletedThisMonth: Number(row.jobs_completed_this_month ?? 0),
   };
 }

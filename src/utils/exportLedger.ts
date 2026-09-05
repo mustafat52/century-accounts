@@ -1,57 +1,72 @@
 import * as XLSX from 'xlsx';
-import type { Customer, Invoice, InvoiceItem } from '../types';
+import type { Customer, Invoice, Quotation, QuotationPayment } from '../types';
+import { PAYMENT_METHOD_LABELS } from '../types';
 import { formatINR } from './format';
 
-function itemDetail(item: InvoiceItem): string {
-  if (item.itemType === 'glass') {
-    const size = `${item.lengthIn ?? '-'}in × ${item.widthIn ?? '-'}in × ${item.glassQty ?? '-'} pcs`;
-    const sft = item.sft != null ? `${item.sft} sft` : '';
-    const rft = item.rft != null ? `${item.rft} rft` : '';
-    return [size, sft, rft].filter(Boolean).join(' · ');
-  }
-  return `Qty ${item.quantity ?? '-'} × ₹${item.rate ?? '-'}`;
-}
+type LedgerRow = [string, string, number | string, number | string, string, number | string];
 
-function customerLedgerRows(customer: Customer, invoices: Invoice[]) {
-  const history = invoices
-    .filter((i) => i.customerId === customer.id)
-    .sort((a, b) => (a.date < b.date ? -1 : 1));
+const HEADER_ROW: LedgerRow = ['Date', 'Bill Number', 'Total Amount', 'Payment Amount', 'Mode', 'Remaining Balance'];
 
-  const rows: Record<string, string | number>[] = [];
+// One combined sheet, in a single narrative order: every active quotation
+// and every settled invoice belonging to this customer, each followed
+// immediately by every payment ever recorded against it (oldest first) —
+// so it reads as "bill raised for X, paid Y on this date via that mode,
+// Z remaining", exactly the way the business actually talks about a bill.
+// Once a quotation converts, its payment history is looked up by the
+// resulting invoice's sourceQuotationId — the payments themselves never
+// move tables, only which bill number they're reported against here.
+function customerLedgerRows(
+  customer: Customer,
+  invoices: Invoice[],
+  quotations: Quotation[],
+  quotationPayments: QuotationPayment[]
+): { rows: LedgerRow[]; totalBusiness: number; totalPending: number } {
+  type Bill = { date: string; billNumber: string; total: number; payments: QuotationPayment[] };
 
-  history.forEach((inv) => {
-    const items = [...inv.items].sort((a, b) => a.sortOrder - b.sortOrder);
-    if (items.length === 0) {
-      // Fallback for any invoice with no line items on record
-      rows.push({
-        Date: inv.date,
-        Invoice: inv.id,
-        Type: inv.kind === 'job' ? 'Job Order' : 'Quick Sale',
-        Item: inv.description,
-        Details: '',
-        'Item Amount': inv.amount,
-        'Invoice Total': inv.amount - inv.discountAmount + inv.gst + inv.transportation,
-        'Invoice Status': inv.status,
+  const activeQuotations = quotations.filter((q) => q.customerId === customer.id && q.status !== 'converted');
+  const customerInvoices = invoices.filter((i) => i.customerId === customer.id);
+
+  const bills: Bill[] = [
+    ...activeQuotations.map((q) => ({
+      date: q.date,
+      billNumber: q.id,
+      total: q.grandTotal,
+      payments: quotationPayments.filter((p) => p.quotationId === q.dbId),
+    })),
+    ...customerInvoices.map((i) => ({
+      date: i.date,
+      billNumber: i.id,
+      total: i.amount - i.discountAmount + i.gst + i.transportation,
+      // Settled invoices carry no payment tracking of their own — the
+      // payments that led here were recorded against the source
+      // quotation while it was still active, and are looked up that way.
+      payments: i.sourceQuotationId ? quotationPayments.filter((p) => p.quotationId === i.sourceQuotationId) : [],
+    })),
+  ].sort((a, b) => (a.date < b.date ? -1 : 1));
+
+  const rows: LedgerRow[] = [];
+  let totalBusiness = 0;
+  let totalPending = 0;
+
+  bills.forEach((bill) => {
+    let remaining = bill.total;
+    rows.push([bill.date, bill.billNumber, bill.total, '', '', remaining]);
+    totalBusiness += bill.total;
+
+    [...bill.payments]
+      .sort((a, b) => (a.paymentDate < b.paymentDate ? -1 : 1))
+      .forEach((p) => {
+        remaining = Math.max(remaining - p.amount, 0);
+        rows.push([p.paymentDate, bill.billNumber, '', p.amount, PAYMENT_METHOD_LABELS[p.method], remaining]);
       });
-      return;
-    }
-    items.forEach((item, idx) => {
-      rows.push({
-        Date: inv.date,
-        Invoice: inv.id,
-        Type: inv.kind === 'job' ? 'Job Order' : 'Quick Sale',
-        Item: item.description,
-        Details: itemDetail(item),
-        'Item Amount': item.amount,
-        // Only show invoice-level totals on the first row of that invoice,
-        // to avoid implying each item carries the full invoice total.
-        'Invoice Total': idx === 0 ? inv.amount - inv.discountAmount + inv.gst + inv.transportation : '',
-        'Invoice Status': idx === 0 ? inv.status : '',
-      });
-    });
+
+    // Only the bill's FINAL remaining balance counts toward total pending
+    // — summing every row's "Remaining Balance" would double-count each
+    // intermediate step between payments.
+    totalPending += remaining;
   });
 
-  return rows;
+  return { rows, totalBusiness, totalPending };
 }
 
 function safeSheetName(name: string, usedNames: Set<string>): string {
@@ -67,27 +82,50 @@ function safeSheetName(name: string, usedNames: Set<string>): string {
   return candidate;
 }
 
-export function exportCustomerLedger(customer: Customer, invoices: Invoice[]) {
-  const rows = customerLedgerRows(customer, invoices);
-  const summary = [
-    { Field: 'Customer', Value: customer.name },
-    { Field: 'Contact', Value: customer.contact },
-    { Field: 'Address', Value: customer.address ?? '' },
-    { Field: 'GSTIN', Value: customer.gstin ?? '' },
-    { Field: '', Value: '' },
-    { Field: 'Total Billed (lifetime)', Value: formatINR(customer.totalBilled) },
-    { Field: 'Outstanding (as of today)', Value: formatINR(customer.outstanding) },
+function customerSheet(
+  customer: Customer,
+  invoices: Invoice[],
+  quotations: Quotation[],
+  quotationPayments: QuotationPayment[]
+) {
+  const { rows, totalBusiness, totalPending } = customerLedgerRows(customer, invoices, quotations, quotationPayments);
+
+  // A single sheet: customer details up top, one blank row, then the full
+  // transaction table, then a totals row — no separate "summary" tab.
+  const aoa: (LedgerRow | (string | number)[])[] = [
+    ['Customer', customer.name],
+    ['Contact', customer.contact ?? ''],
+    ['Address', customer.address ?? ''],
+    ['GSTIN', customer.gstin ?? ''],
+    [],
+    ['Active Quoted', formatINR(customer.totalBilled)],
+    ['Outstanding', formatINR(customer.outstanding)],
+    [],
+    HEADER_ROW,
+    ...rows,
+    ['', 'Total', totalBusiness, '', '', totalPending],
   ];
 
-  const wb = XLSX.utils.book_new();
-  // Purchase history first — it's what the business actually wants to see.
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Purchase History');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary, { skipHeader: true }), 'Summary');
+  return XLSX.utils.aoa_to_sheet(aoa);
+}
 
+export function exportCustomerLedger(
+  customer: Customer,
+  invoices: Invoice[],
+  quotations: Quotation[],
+  quotationPayments: QuotationPayment[]
+) {
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, customerSheet(customer, invoices, quotations, quotationPayments), 'Ledger');
   XLSX.writeFile(wb, `${customer.name.replace(/\s+/g, '_')}_Ledger.xlsx`);
 }
 
-export function exportAllCustomersLedger(customers: Customer[], invoices: Invoice[]) {
+export function exportAllCustomersLedger(
+  customers: Customer[],
+  invoices: Invoice[],
+  quotations: Quotation[],
+  quotationPayments: QuotationPayment[]
+) {
   const wb = XLSX.utils.book_new();
 
   const overview = customers.map((c) => ({
@@ -95,17 +133,18 @@ export function exportAllCustomersLedger(customers: Customer[], invoices: Invoic
     Contact: c.contact,
     Address: c.address ?? '',
     GSTIN: c.gstin ?? '',
-    'Total Billed (lifetime)': c.totalBilled,
-    'Outstanding (as of today)': c.outstanding,
+    'Active Quoted': c.totalBilled,
+    Outstanding: c.outstanding,
   }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(overview), 'All Customers');
 
   const usedNames = new Set<string>(['All Customers']);
   customers.forEach((c) => {
-    const rows = customerLedgerRows(c, invoices);
-    if (rows.length === 0) return;
+    const hasActivity =
+      invoices.some((i) => i.customerId === c.id) || quotations.some((q) => q.customerId === c.id);
+    if (!hasActivity) return;
     const sheetName = safeSheetName(c.name, usedNames);
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), sheetName);
+    XLSX.utils.book_append_sheet(wb, customerSheet(c, invoices, quotations, quotationPayments), sheetName);
   });
 
   XLSX.writeFile(wb, 'Century_Glass_Art_All_Customer_Ledgers.xlsx');

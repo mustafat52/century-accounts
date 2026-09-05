@@ -1,38 +1,45 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import type { PaymentMethod } from '../types';
+import { PAYMENT_METHOD_LABELS } from '../types';
 import { formatINR, capitalizeFirst } from '../utils/format';
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Records one installment against a quotation's running balance — this IS
+// the payment ledger (see quotation_payments in schema.sql), shown in
+// full on the Ledger printable. Nothing gets recorded against an invoice
+// anymore; by the time something becomes an invoice it's already settled.
 export default function PaymentModal() {
-  const { isPaymentModalOpen, paymentModalInvoiceDbId, closePaymentModal, invoices, recordInvoicePayment, openPrint } =
+  const { isPaymentModalOpen, paymentModalQuotationDbId, closePaymentModal, quotations, recordQuotationPayment, openPrint } =
     useApp();
 
-  const invoice = paymentModalInvoiceDbId ? invoices.find((i) => i.dbId === paymentModalInvoiceDbId) : undefined;
+  const quotation = paymentModalQuotationDbId ? quotations.find((q) => q.dbId === paymentModalQuotationDbId) : undefined;
 
   const [amount, setAmount] = useState('');
+  const [method, setMethod] = useState<PaymentMethod>('cash');
   const [note, setNote] = useState('');
 
   useEffect(() => {
     if (isPaymentModalOpen) {
       setAmount('');
+      setMethod('cash');
       setNote('');
     }
-  }, [isPaymentModalOpen, paymentModalInvoiceDbId]);
+  }, [isPaymentModalOpen, paymentModalQuotationDbId]);
 
-  if (!isPaymentModalOpen || !invoice) return null;
+  if (!isPaymentModalOpen || !quotation) return null;
 
   const amountNum = parseFloat(amount) || 0;
-  const total = invoice.amount - invoice.discountAmount + invoice.gst + invoice.transportation;
 
   const handleSave = async () => {
-    if (amountNum <= 0 || amountNum > invoice.balance || !paymentModalInvoiceDbId) return;
-    await recordInvoicePayment(paymentModalInvoiceDbId, amountNum, note || undefined);
+    if (amountNum <= 0 || amountNum > quotation.balanceAmount || !paymentModalQuotationDbId) return;
+    await recordQuotationPayment(paymentModalQuotationDbId, amountNum, method, note || undefined);
     closePaymentModal();
-    // Immediately offer the printable receipt for this payment.
-    openPrint('invoice', invoice.id);
+    // Immediately offer the printable ledger showing this payment.
+    openPrint('quotation', quotation.id);
   };
 
   return (
@@ -47,7 +54,7 @@ export default function PaymentModal() {
 
         <div className="modal-body">
           <div className="row-sub" style={{ marginBottom: 4 }}>
-            {invoice.id} · Total {formatINR(total)} · Balance due {formatINR(invoice.balance)}
+            {quotation.id} · Total {formatINR(quotation.grandTotal)} · Balance due {formatINR(quotation.balanceAmount)}
           </div>
 
           <div className="form-row">
@@ -63,6 +70,16 @@ export default function PaymentModal() {
 
           <div className="form-row">
             <div className="form-field">
+              <label>Mode of payment</label>
+              <select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
+                {(Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[]).map((m) => (
+                  <option key={m} value={m}>
+                    {PAYMENT_METHOD_LABELS[m]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-field">
               <label>Note (optional)</label>
               <input type="text" value={note} onChange={(e) => setNote(capitalizeFirst(e.target.value))} placeholder="e.g. advance for materials" />
             </div>
@@ -70,9 +87,9 @@ export default function PaymentModal() {
 
           {amountNum > 0 && (
             <div className="row-sub">
-              {amountNum >= invoice.balance
-                ? 'This fully settles the invoice.'
-                : `Remaining balance after this: ${formatINR(invoice.balance - amountNum)}`}
+              {amountNum >= quotation.balanceAmount
+                ? 'This fully settles the bill — it can then be converted to an invoice.'
+                : `Remaining balance after this: ${formatINR(quotation.balanceAmount - amountNum)}`}
             </div>
           )}
         </div>

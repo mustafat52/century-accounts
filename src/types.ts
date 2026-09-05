@@ -1,14 +1,32 @@
-export type InvoiceStatus = 'in_progress' | 'due' | 'overdue' | 'partial' | 'paid';
-export type InvoiceKind = 'quick' | 'job';
-export type WorkStatus = 'in_progress' | 'completed';
+// Quotation lifecycle status, computed live by the quotations_effective
+// view — never stored/mutated directly on the frontend.
+//   'due'       — pending, within the 30-day clock from creation, balance > 0
+//   'overdue'   — pending, past the 30-day clock, balance > 0
+//   'paid'      — pending, balance = 0, ready to Convert to an invoice
+//   'converted' — already settled into an invoice
+//   'expired'   — pending, past valid_until, zero payments ever recorded
+// A quotation can independently be "partial" (0 < paidAmount < grandTotal)
+// regardless of due/overdue — that's shown as extra badge text derived
+// client-side from paidAmount, not a separate status value.
+export type QuotationEffectiveStatus = 'due' | 'overdue' | 'paid' | 'converted' | 'expired';
 
 export type InvoiceSlab = 'A' | 'B' | 'C' | 'D';
 // Invoice-level discount tier — NOT a per-item label. One slab per bill.
-// A = 10% off, B = 15% off, C = 20% off, D = custom % (see discountPercent).
-export const SLAB_DISCOUNT_PERCENT: Record<Exclude<InvoiceSlab, 'D'>, number> = {
-  A: 10,
-  B: 15,
-  C: 20,
+// A = custom % (typed in, see discountPercent), B = 10% off, C = 15% off,
+// D = 20% off.
+export const SLAB_DISCOUNT_PERCENT: Record<Exclude<InvoiceSlab, 'A'>, number> = {
+  B: 10,
+  C: 15,
+  D: 20,
+};
+
+// How a customer payment against a quotation was actually received.
+export type PaymentMethod = 'cash' | 'upi' | 'cheque' | 'bank_transfer';
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  cash: 'Cash',
+  upi: 'UPI',
+  cheque: 'Cheque',
+  bank_transfer: 'Bank Transfer',
 };
 
 export interface Customer {
@@ -65,11 +83,29 @@ export interface InvoiceItem {
 // by QuotationModal and has no computed sft/rft/amount fields.
 export type QuotationItem = InvoiceItem;
 
+// A single installment recorded against a quotation — the entire payment
+// ledger for a bill lives here, start to finish, and is never moved even
+// after the quotation converts to an invoice (see AppContext).
+export interface QuotationPayment {
+  id: string;
+  quotationId: string;
+  amount: number;
+  paymentDate: string;
+  method: PaymentMethod;
+  note: string | null;
+  createdAt: string;
+}
+
+// A TERMINAL, read-only record — only ever created by converting a fully
+// paid quotation (see AppContext.convertQuotationToInvoice). There is no
+// due date, work status, or payment tracking here anymore; all of that
+// lived, and still lives, on the source quotation. sourceQuotationId is
+// what powers the "Roll back to Quotation" action.
 export interface Invoice {
   id: string; // human-readable, e.g. "INV-1043"
   dbId: string; // real Supabase UUID, used for writes
   customerId: string;
-  kind: InvoiceKind;
+  sourceQuotationId: string | null;
   description: string; // short summary for tables/lists
   amount: number; // subtotal (sum of items), before discount
   slab: InvoiceSlab;
@@ -78,12 +114,6 @@ export interface Invoice {
   gst: number; // computed on (amount - discountAmount) — split 50/50 into CGST/SGST for display
   transportation: number; // added after GST, matching the business's own template
   date: string;
-  dueDate: string | null; // null while a job order is still in_progress
-  status: InvoiceStatus; // computed live server-side, never stored/mutated directly
-  workStatus: WorkStatus | null; // null for quick-sale invoices
-  completedAt: string | null;
-  paidAmount: number;
-  balance: number;
   items: InvoiceItem[];
 }
 
@@ -200,6 +230,9 @@ export interface MonthlyFigure {
 
 export type QuotationStatus = 'pending' | 'converted' | 'expired';
 
+// The living document for a job's entire lifecycle — created, negotiated,
+// worked, and paid (in installments, see QuotationPayment) — right up
+// until balanceAmount reaches zero and it's converted to an Invoice.
 export interface Quotation {
   id: string;
   dbId: string;
@@ -207,7 +240,7 @@ export interface Quotation {
   description: string;
   amount: number;
   // Editable for the life of a 'pending' quotation (price negotiation) —
-  // unlike an invoice's slab, which is fixed once the invoice is created.
+  // unlike an invoice's slab, which is fixed forever once converted.
   slab: InvoiceSlab;
   discountPercent: number;
   discountAmount: number;
@@ -218,6 +251,12 @@ export interface Quotation {
   date: string;
   validUntil: string;
   status: QuotationStatus;
+  convertedInvoiceId: string | null;
+  // ---- Live payment tracking (from quotations_effective) ----
+  grandTotal: number; // amount - discountAmount + gst + transportation
+  paidAmount: number; // sum of quotation_payments
+  balanceAmount: number; // grandTotal - paidAmount, floored at 0
+  effectiveStatus: QuotationEffectiveStatus;
 }
 
 export interface Worker {
@@ -244,8 +283,9 @@ export interface ImportantLink {
 }
 
 export interface DashboardSummary {
-  customersBilledThisMonth: number;
-  jobsInProgress: number;
+  customersPaidThisMonth: number;
+  quotationsActive: number;
+  quotationsOverdue: number;
   jobsCompletedThisMonth: number;
 }
 

@@ -1,17 +1,17 @@
 import { useState } from 'react';
-import type { Invoice } from '../types';
+import type { Quotation } from '../types';
 import { buildReminderMessage } from '../utils/reminderMessage';
 
 interface CopyReminderButtonProps {
-  invoice: Invoice;
+  quotation: Quotation;
   customerName: string;
 }
 
-export default function CopyReminderButton({ invoice, customerName }: CopyReminderButtonProps) {
+export default function CopyReminderButton({ quotation, customerName }: CopyReminderButtonProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
-    const message = buildReminderMessage(invoice, customerName);
+    const message = buildReminderMessage(quotation, customerName);
 
     try {
       await navigator.clipboard.writeText(message);

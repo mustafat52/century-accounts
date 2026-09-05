@@ -2,7 +2,18 @@ import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatINR } from '../utils/format';
 import type { QuotationItem } from '../types';
+import { PAYMENT_METHOD_LABELS } from '../types';
 import logoLight from '../assets/logo-light.png';
+
+const BUSINESS_HEADER = (
+  <div style={{ fontSize: 10, color: '#666', marginTop: 4, lineHeight: 1.4 }}>
+    11-1-268, X Road, opposite Hameed Cafe, Darus Salam, Aghapura, Nampally, Hyderabad, Telangana 500001
+    <br />
+    centuryglassart@gmail.com
+    <br />
+    GSTIN: 36AMJPH2003H1ZI
+  </div>
+);
 
 export default function PrintableDocument() {
   const {
@@ -10,21 +21,21 @@ export default function PrintableDocument() {
     closePrint,
     invoices,
     quotations,
+    quotationPayments,
     customers,
     vendors,
     vendorSlips,
-    openConvertQuotationModal,
+    convertQuotationToInvoice,
     fetchQuotationItemsForPrint,
   } = useApp();
 
   // Quotations don't carry their items in app state (unlike invoices,
   // which are preloaded) — so printing one means fetching its real,
-  // fully-computed line items on demand here, instead of falling back to
-  // one collapsed summary row like this used to.
+  // fully-computed line items on demand here.
   const [quotationItems, setQuotationItems] = useState<QuotationItem[]>([]);
 
   useEffect(() => {
-    if (printTarget?.kind === 'quotation') {
+    if (printTarget?.kind === 'quotation' || printTarget?.kind === 'ledger') {
       const q = quotations.find((qq) => qq.id === printTarget.id);
       if (q) {
         fetchQuotationItemsForPrint(q.dbId).then(setQuotationItems);
@@ -57,13 +68,7 @@ export default function PrintableDocument() {
           <div className="receipt-head">
             <div>
               <img src={logoLight} alt="Century Glass Art" style={{ width: 130, height: 'auto', marginBottom: 4 }} />
-              <div style={{ fontSize: 11, color: '#666', marginTop: 4, lineHeight: 1.4 }}>
-                11-1-268, X Road, opposite Hameed Cafe, Darus Salam, Aghapura, Nampally, Hyderabad, Telangana 500001
-                <br />
-                centuryglassart@gmail.com
-                <br />
-                GSTIN: 36AMJPH2003H1ZI
-              </div>
+              {BUSINESS_HEADER}
             </div>
             <div className="receipt-meta">
               <div style={{ fontSize: 15, fontWeight: 700, color: '#1a1a1a' }}>PURCHASE SLIP</div>
@@ -116,6 +121,146 @@ export default function PrintableDocument() {
 
   const customer = (id: string) => customers.find((c) => c.id === id);
 
+  // ---- Ledger: the running-balance/payment-history document ----
+  // Deliberately a SEPARATE document from the formal Quotation below, even
+  // though it shares the same visual shell (header/branding/business
+  // details) — a formal quotation is a fixed offer; the Ledger is a live
+  // snapshot of what's been paid and what's still owed, and only exists
+  // pre-settlement. Once a quotation converts, the terminal Invoice
+  // printable (below) is what's used instead — balance is always ₹0 by
+  // then, so there's nothing left for a running ledger to show.
+  if (printTarget.kind === 'ledger') {
+    const quotation = quotations.find((q) => q.id === printTarget.id);
+    if (!quotation) return null;
+    const cust = customer(quotation.customerId);
+    const payments = quotationPayments
+      .filter((p) => p.quotationId === quotation.dbId)
+      .sort((a, b) => (a.paymentDate < b.paymentDate ? -1 : 1));
+    const cgst = quotation.gst / 2;
+    const sgst = quotation.gst / 2;
+
+    return (
+      <div className="receipt-overlay">
+        <div className="receipt-toolbar no-print">
+          {quotation.balanceAmount <= 0 && quotation.status === 'pending' && (
+            <button
+              className="btn btn-primary"
+              onClick={async () => {
+                await convertQuotationToInvoice(quotation.dbId);
+                closePrint();
+              }}
+            >
+              Convert to Invoice
+            </button>
+          )}
+          <button className="btn btn-ghost" onClick={() => window.print()}>
+            Print
+          </button>
+          <button className="btn btn-ghost" onClick={closePrint}>
+            Close
+          </button>
+        </div>
+
+        <div className="receipt-page">
+          <div className="receipt-head">
+            <div>
+              <img src={logoLight} alt="Century Glass Art" style={{ width: 120, height: 'auto', marginBottom: 4 }} />
+              {BUSINESS_HEADER}
+            </div>
+            <div className="receipt-meta">
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>PAYMENT LEDGER</div>
+              <div style={{ marginTop: 6 }}>{quotation.id}</div>
+              <div>As of: {new Date().toISOString().slice(0, 10)}</div>
+            </div>
+          </div>
+
+          <div className="receipt-section-label">Bill To</div>
+          <div style={{ fontSize: 12, marginBottom: 14 }}>
+            <div style={{ fontWeight: 700 }}>{cust?.name ?? 'Unknown customer'}</div>
+            <div style={{ color: '#555' }}>{cust?.contact}</div>
+          </div>
+
+          <div className="receipt-section-label">Payments Received</div>
+          <table className="receipt-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Mode</th>
+                <th>Note</th>
+                <th style={{ textAlign: 'right' }}>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {payments.map((p) => (
+                <tr key={p.id}>
+                  <td>{p.paymentDate}</td>
+                  <td>{PAYMENT_METHOD_LABELS[p.method]}</td>
+                  <td>{p.note || '—'}</td>
+                  <td style={{ textAlign: 'right' }}>{formatINR(p.amount)}</td>
+                </tr>
+              ))}
+              {payments.length === 0 && (
+                <tr>
+                  <td colSpan={4} style={{ color: '#888' }}>
+                    No payments recorded yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+
+          <div className="receipt-totals">
+            <div className="receipt-totals-row">
+              <span>Subtotal</span>
+              <span>{formatINR(quotation.amount - quotation.discountAmount)}</span>
+            </div>
+            {quotation.gst > 0 && (
+              <>
+                <div className="receipt-totals-row">
+                  <span>CGST (9%)</span>
+                  <span>{formatINR(cgst)}</span>
+                </div>
+                <div className="receipt-totals-row">
+                  <span>SGST (9%)</span>
+                  <span>{formatINR(sgst)}</span>
+                </div>
+              </>
+            )}
+            {quotation.transportation > 0 && (
+              <div className="receipt-totals-row">
+                <span>Transportation</span>
+                <span>{formatINR(quotation.transportation)}</span>
+              </div>
+            )}
+            <div className="receipt-totals-row grand">
+              <span>Total</span>
+              <span>{formatINR(quotation.grandTotal)}</span>
+            </div>
+            <div className="receipt-totals-row" style={{ marginTop: 8, borderTop: '1px dashed #ccc', paddingTop: 8 }}>
+              <span>Paid so far</span>
+              <span>{formatINR(quotation.paidAmount)}</span>
+            </div>
+            <div className="receipt-totals-row grand">
+              <span>Balance Due</span>
+              <span>{formatINR(quotation.balanceAmount)}</span>
+            </div>
+          </div>
+
+          <div className="receipt-footer">
+            <div>
+              {quotation.balanceAmount <= 0
+                ? 'Fully settled — ready to convert to an invoice.'
+                : 'Advance received with thanks. Kindly clear the remaining balance at your earliest convenience.'}
+            </div>
+            <div className="receipt-signature">
+              <div className="receipt-signature-line">For Century Glass Art</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const invoice = printTarget.kind === 'invoice' ? invoices.find((i) => i.id === printTarget.id) : undefined;
   const quotation = printTarget.kind === 'quotation' ? quotations.find((q) => q.id === printTarget.id) : undefined;
 
@@ -145,17 +290,6 @@ export default function PrintableDocument() {
   return (
     <div className="receipt-overlay">
       <div className="receipt-toolbar no-print">
-        {printTarget.kind === 'quotation' && quotation?.status === 'pending' && (
-          <button
-            className="btn btn-primary"
-            onClick={() => {
-              openConvertQuotationModal(quotation.dbId);
-              closePrint();
-            }}
-          >
-            Convert to Invoice
-          </button>
-        )}
         <button className="btn btn-ghost" onClick={() => window.print()}>
           Print
         </button>
@@ -168,13 +302,7 @@ export default function PrintableDocument() {
         <div className="receipt-head">
           <div>
             <img src={logoLight} alt="Century Glass Art" style={{ width: 120, height: 'auto', marginBottom: 4 }} />
-            <div style={{ fontSize: 10, color: '#666', marginTop: 4, lineHeight: 1.4 }}>
-              11-1-268, X Road, opposite Hameed Cafe, Darus Salam, Aghapura, Nampally, Hyderabad, Telangana 500001
-              <br />
-              centuryglassart@gmail.com
-              <br />
-              GSTIN: 36AMJPH2003H1ZI
-            </div>
+            {BUSINESS_HEADER}
           </div>
           <div className="receipt-meta">
             <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>
@@ -182,11 +310,8 @@ export default function PrintableDocument() {
             </div>
             <div style={{ marginTop: 6 }}>{doc.id}</div>
             <div>Date: {doc.date}</div>
-            {isInvoice && invoice && <div>Due: {invoice.dueDate ?? 'Set on completion'}</div>}
             {!isInvoice && quotation && <div>Valid until: {quotation.validUntil}</div>}
-            {isInvoice && invoice && (
-              <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{invoice.slab}</div>
-            )}
+            <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{slab}</div>
           </div>
         </div>
 
@@ -206,6 +331,7 @@ export default function PrintableDocument() {
                 <tr>
                   <th>Area</th>
                   <th>Description of Goods</th>
+                  <th style={{ textAlign: 'center' }}>Thickness</th>
                   <th style={{ textAlign: 'center' }}>Size (in)</th>
                   <th style={{ textAlign: 'center' }}>Qty</th>
                   <th style={{ textAlign: 'right' }}>Sft</th>
@@ -221,6 +347,7 @@ export default function PrintableDocument() {
                   <tr key={item.id}>
                     <td>{item.area || '—'}</td>
                     <td>{item.description}</td>
+                    <td style={{ textAlign: 'center' }}>{item.thicknessMm || '—'}</td>
                     <td style={{ textAlign: 'center' }}>{item.lengthIn} x {item.widthIn}</td>
                     <td style={{ textAlign: 'center' }}>{item.glassQty}</td>
                     <td style={{ textAlign: 'right' }}>{item.sft?.toFixed(2)}</td>
@@ -242,7 +369,6 @@ export default function PrintableDocument() {
             <table className="receipt-table">
               <thead>
                 <tr>
-                  <th>Area</th>
                   <th>Description of Goods</th>
                   <th style={{ textAlign: 'center' }}>Qty</th>
                   <th style={{ textAlign: 'right' }}>Rate</th>
@@ -252,7 +378,6 @@ export default function PrintableDocument() {
               <tbody>
                 {hardwareItems.map((item) => (
                   <tr key={item.id}>
-                    <td>{item.area || '—'}</td>
                     <td>{item.description}</td>
                     <td style={{ textAlign: 'center' }}>{item.quantity}</td>
                     <td style={{ textAlign: 'right' }}>{formatINR(item.rate ?? 0)}</td>
@@ -291,18 +416,6 @@ export default function PrintableDocument() {
             <span>Total</span>
             <span>{formatINR(total)}</span>
           </div>
-          {isInvoice && invoice && invoice.paidAmount > 0 && (
-            <>
-              <div className="receipt-totals-row" style={{ marginTop: 8, borderTop: '1px dashed #ccc', paddingTop: 8 }}>
-                <span>Paid so far</span>
-                <span>{formatINR(invoice.paidAmount)}</span>
-              </div>
-              <div className="receipt-totals-row grand">
-                <span>Balance Due</span>
-                <span>{formatINR(invoice.balance)}</span>
-              </div>
-            </>
-          )}
         </div>
 
         <div className="receipt-bottom">
@@ -336,9 +449,7 @@ export default function PrintableDocument() {
           <div className="receipt-footer">
             <div>
               {isInvoice
-                ? invoice && invoice.paidAmount > 0 && invoice.balance > 0
-                  ? 'Advance received with thanks. Balance due by the date above.'
-                  : 'Thank you for your business. Payment due by the date above.'
+                ? 'Thank you for your business. Paid in full.'
                 : 'This quotation is an estimate and subject to confirmation at the time of order.'}
             </div>
             <div className="receipt-signature">
