@@ -3,7 +3,6 @@ import Topbar from '../components/Topbar';
 import StatCard from '../components/StatCard';
 import ExpenseModal from '../components/ExpenseModal';
 import WorkerModal from '../components/WorkerModal';
-import AdvanceModal from '../components/AdvanceModal';
 import { useApp } from '../context/AppContext';
 import { formatINR } from '../utils/format';
 import { exportAllExpenses, exportWorkerLedger, exportAllWorkersLedger } from '../utils/exportLedger';
@@ -19,14 +18,17 @@ function currentMonthStart(): string {
 }
 
 // The full picture for one worker: editable salary, every advance ever
-// taken, every salary settlement ever paid, and a form to record a new
-// settlement — same spirit as CustomerDetailModal on the billing side.
+// taken, every salary settlement ever paid, and a single "Record Payment"
+// action — same spirit as CustomerDetailModal on the billing side. There
+// is deliberately only ONE input here, not a choice between "advance" or
+// "settlement": whether an amount counts as one or the other is decided
+// automatically based on what's still owed for the month, not by the
+// person typing it in.
 function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose: () => void }) {
-  const { workerAdvances, workerPayments, recordWorkerPayment, openEditWorkerModal } = useApp();
+  const { workerAdvances, workerPayments, logWorkerAdvance, recordWorkerPayment, openEditWorkerModal } = useApp();
 
   const [payAmount, setPayAmount] = useState('');
   const [payDate, setPayDate] = useState(today());
-  const [payForMonth, setPayForMonth] = useState(currentMonthStart());
   const [payNote, setPayNote] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -40,11 +42,20 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
     .sort((a, b) => (a.paymentDate < b.paymentDate ? 1 : -1));
 
   const payAmountNum = parseFloat(payAmount) || 0;
+  // This is the actual classification rule, applied automatically —
+  // never a choice the person makes: an amount that doesn't fully cover
+  // what's left owed this month is an advance; an amount that covers (or
+  // exceeds) it settles the month.
+  const willSettle = payAmountNum > 0 && payAmountNum >= worker.remainingThisMonth;
 
   const handleRecordPayment = async () => {
     if (payAmountNum <= 0 || saving) return;
     setSaving(true);
-    await recordWorkerPayment(worker.id, payAmountNum, payDate, payForMonth, payNote || undefined);
+    if (willSettle) {
+      await recordWorkerPayment(worker.id, payAmountNum, payDate, currentMonthStart(), payNote || undefined);
+    } else {
+      await logWorkerAdvance({ workerId: worker.id, amount: payAmountNum, date: payDate, note: payNote || undefined });
+    }
     setSaving(false);
     setPayAmount('');
     setPayNote('');
@@ -73,10 +84,11 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
             />
           </div>
 
-          <div className="section-title">Record a salary settlement payment</div>
+          <div className="section-title">Record Payment</div>
           <div className="row-sub" style={{ marginBottom: 8 }}>
-            Distinct from an advance — this settles what's actually owed for a given month
-            (salary minus that month's advances).
+            Just type the amount — it's automatically counted as an <strong>Advance</strong> if it
+            doesn't cover everything still owed this month, or a <strong>Salary Settlement</strong> if
+            it covers (or exceeds) what's left.
           </div>
           <div className="form-row">
             <div className="form-field">
@@ -93,14 +105,15 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
               <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
             </div>
             <div className="form-field">
-              <label>For month</label>
-              <input type="date" value={payForMonth} onChange={(e) => setPayForMonth(e.target.value)} />
-            </div>
-            <div className="form-field">
               <label>Note (optional)</label>
               <input type="text" value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="e.g. Paid via bank transfer" />
             </div>
           </div>
+          {payAmountNum > 0 && (
+            <div className="row-sub" style={{ marginBottom: 8 }}>
+              This will be recorded as {willSettle ? <strong>a Salary Settlement</strong> : <strong>an Advance</strong>}.
+            </div>
+          )}
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
             <button className="btn btn-primary btn-small" onClick={handleRecordPayment} disabled={payAmountNum <= 0 || saving}>
               {saving ? 'Saving…' : 'Record Payment'}
@@ -187,17 +200,8 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
 }
 
 export default function Expenses() {
-  const {
-    expenses,
-    vendorPurchases,
-    vendors,
-    workers,
-    workerAdvances,
-    workerPayments,
-    openExpenseModal,
-    openWorkerModal,
-    openAdvanceModal,
-  } = useApp();
+  const { expenses, vendorPurchases, vendors, workers, workerAdvances, workerPayments, openExpenseModal, openWorkerModal } =
+    useApp();
   const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
   const selectedWorker = workers.find((w) => w.id === selectedWorkerId) ?? null;
 
@@ -281,11 +285,8 @@ export default function Expenses() {
               >
                 Export All (Excel)
               </button>
-              <button className="btn btn-ghost btn-small desktop-only" onClick={openWorkerModal}>
+              <button className="btn btn-primary btn-small desktop-only" onClick={openWorkerModal}>
                 + New Worker
-              </button>
-              <button className="btn btn-primary btn-small desktop-only" onClick={() => openAdvanceModal()}>
-                + Log Advance
               </button>
             </div>
           </div>
@@ -296,7 +297,6 @@ export default function Expenses() {
                 <th>Monthly Salary</th>
                 <th>Advances Taken</th>
                 <th>Remaining to Pay</th>
-                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -315,17 +315,6 @@ export default function Expenses() {
                   <td className="num" style={{ color: w.remainingThisMonth > 0 ? 'var(--success)' : 'var(--text-muted)' }}>
                     {formatINR(w.remainingThisMonth)}
                   </td>
-                  <td>
-                    <button
-                      className="btn btn-ghost btn-small desktop-only"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openAdvanceModal(w.id);
-                      }}
-                    >
-                      Log Advance
-                    </button>
-                  </td>
                 </tr>
               ))}
             </tbody>
@@ -335,7 +324,6 @@ export default function Expenses() {
 
       <ExpenseModal />
       <WorkerModal />
-      <AdvanceModal />
       <WorkerDetailModal worker={selectedWorker} onClose={() => setSelectedWorkerId(null)} />
     </>
   );

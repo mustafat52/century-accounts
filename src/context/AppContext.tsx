@@ -285,11 +285,6 @@ interface AppContextValue {
   openEditWorkerModal: (workerId: string) => void;
   closeWorkerModal: () => void;
 
-  isAdvanceModalOpen: boolean;
-  advanceModalWorkerId: string | null;
-  openAdvanceModal: (workerId?: string) => void;
-  closeAdvanceModal: () => void;
-
   isLinkModalOpen: boolean;
   openLinkModal: () => void;
   closeLinkModal: () => void;
@@ -349,8 +344,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [editingWorkerId, setEditingWorkerId] = useState<string | null>(null);
   const [workerAdvances, setWorkerAdvances] = useState<WorkerAdvance[]>([]);
   const [workerPayments, setWorkerPayments] = useState<WorkerPayment[]>([]);
-  const [isAdvanceModalOpen, setAdvanceModalOpen] = useState(false);
-  const [advanceModalWorkerId, setAdvanceModalWorkerId] = useState<string | null>(null);
   const [isLinkModalOpen, setLinkModalOpen] = useState(false);
   const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
   const [paymentModalQuotationDbId, setPaymentModalQuotationDbId] = useState<string | null>(null);
@@ -1333,13 +1326,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setWorkerModalOpen(false);
         setEditingWorkerId(null);
       },
-      isAdvanceModalOpen,
-      advanceModalWorkerId,
-      openAdvanceModal: (workerId?: string) => {
-        setAdvanceModalWorkerId(workerId ?? null);
-        setAdvanceModalOpen(true);
-      },
-      closeAdvanceModal: () => setAdvanceModalOpen(false),
       isLinkModalOpen,
       openLinkModal: () => setLinkModalOpen(true),
       closeLinkModal: () => setLinkModalOpen(false),
@@ -1392,8 +1378,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       editingQuotationId,
       isWorkerModalOpen,
       editingWorkerId,
-      isAdvanceModalOpen,
-      advanceModalWorkerId,
       isLinkModalOpen,
       isPaymentModalOpen,
       paymentModalQuotationDbId,
