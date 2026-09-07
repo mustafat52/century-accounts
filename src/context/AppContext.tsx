@@ -13,9 +13,12 @@ import type {
   PaymentMethod,
   MonthlyFigure,
   Worker,
+  WorkerAdvance,
+  WorkerPayment,
   ImportantLink,
   DashboardSummary,
   VendorPurchase,
+  VendorPayment,
   PriceListItem,
   VendorSlip,
   VendorSlipItem,
@@ -37,9 +40,12 @@ import {
   mapExpense,
   mapMonthlyFigure,
   mapWorker,
+  mapWorkerAdvance,
+  mapWorkerPayment,
   mapImportantLink,
   mapDashboardSummary,
   mapVendorPurchase,
+  mapVendorPayment,
   mapPriceListItem,
   mapVendorSlip,
   mapVendorSlipItem,
@@ -106,6 +112,7 @@ interface NewVendorSlipItemInput {
 interface NewVendorSlipInput {
   vendorId: string;
   careOf: CareOf;
+  customerName?: string | null;
   items: NewVendorSlipItemInput[];
 }
 
@@ -196,6 +203,7 @@ interface AppContextValue {
   addExpense: (input: NewExpenseInput) => Promise<void>;
 
   vendorPurchases: VendorPurchase[];
+  vendorPayments: VendorPayment[];
   addVendorPurchase: (input: NewVendorPurchaseInput) => Promise<void>;
   recordVendorPayment: (vendorId: string, amount: number, note?: string) => Promise<void>;
 
@@ -234,7 +242,11 @@ interface AppContextValue {
 
   workers: Worker[];
   addWorker: (input: NewWorkerInput) => Promise<void>;
+  updateWorker: (workerId: string, input: NewWorkerInput) => Promise<void>;
+  workerAdvances: WorkerAdvance[];
   logWorkerAdvance: (input: NewWorkerAdvanceInput) => Promise<void>;
+  workerPayments: WorkerPayment[];
+  recordWorkerPayment: (workerId: string, amount: number, date: string, forMonth: string, note?: string) => Promise<void>;
 
   links: ImportantLink[];
   addLink: (input: NewLinkInput) => Promise<void>;
@@ -268,7 +280,9 @@ interface AppContextValue {
   closeQuotationModal: () => void;
 
   isWorkerModalOpen: boolean;
+  editingWorkerId: string | null;
   openWorkerModal: () => void;
+  openEditWorkerModal: (workerId: string) => void;
   closeWorkerModal: () => void;
 
   isAdvanceModalOpen: boolean;
@@ -294,6 +308,7 @@ interface AppContextValue {
 
   authLoading: boolean;
   dataLoading: boolean;
+  hasLoadedOnce: boolean;
   isAuthenticated: boolean;
   currentUserName: string | null;
   login: (email: string, password: string) => Promise<string | null>;
@@ -310,6 +325,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [vendorPurchases, setVendorPurchases] = useState<VendorPurchase[]>([]);
+  const [vendorPayments, setVendorPayments] = useState<VendorPayment[]>([]);
   const [vendorSlips, setVendorSlips] = useState<VendorSlip[]>([]);
   const [purchaseBills, setPurchaseBills] = useState<PurchaseBill[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -330,6 +346,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [quotationModalCustomerId, setQuotationModalCustomerId] = useState<string | null>(null);
   const [editingQuotationId, setEditingQuotationId] = useState<string | null>(null);
   const [isWorkerModalOpen, setWorkerModalOpen] = useState(false);
+  const [editingWorkerId, setEditingWorkerId] = useState<string | null>(null);
+  const [workerAdvances, setWorkerAdvances] = useState<WorkerAdvance[]>([]);
+  const [workerPayments, setWorkerPayments] = useState<WorkerPayment[]>([]);
   const [isAdvanceModalOpen, setAdvanceModalOpen] = useState(false);
   const [advanceModalWorkerId, setAdvanceModalWorkerId] = useState<string | null>(null);
   const [isLinkModalOpen, setLinkModalOpen] = useState(false);
@@ -342,6 +361,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [currentUserName, setCurrentUserName] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
   const isAuthenticated = Boolean(session);
 
@@ -359,6 +379,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const refreshVendorPurchases = useCallback(async () => {
     const { data } = await supabase.from('vendor_purchases_effective').select('*').order('expense_date', { ascending: false });
     if (data) setVendorPurchases(data.map(mapVendorPurchase));
+  }, []);
+
+  const refreshVendorPayments = useCallback(async () => {
+    const { data } = await supabase.from('vendor_payments').select('*').order('payment_date', { ascending: false });
+    if (data) setVendorPayments(data.map(mapVendorPayment));
   }, []);
 
   const refreshVendorSlips = useCallback(async () => {
@@ -380,6 +405,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const refreshWorkers = useCallback(async () => {
     const { data } = await supabase.from('worker_month_summary').select('*').order('name');
     if (data) setWorkers(data.map(mapWorker));
+  }, []);
+
+  const refreshWorkerAdvances = useCallback(async () => {
+    const { data } = await supabase.from('worker_advances').select('*').order('advance_date', { ascending: false });
+    if (data) setWorkerAdvances(data.map(mapWorkerAdvance));
+  }, []);
+
+  const refreshWorkerPayments = useCallback(async () => {
+    const { data } = await supabase.from('worker_payments').select('*').order('payment_date', { ascending: false });
+    if (data) setWorkerPayments(data.map(mapWorkerPayment));
   }, []);
 
   const refreshExpenses = useCallback(async () => {
@@ -436,8 +471,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       quotationPaymentsRes,
       expensesRes,
       vendorPurchasesRes,
+      vendorPaymentsRes,
       monthlyRes,
       workersRes,
+      workerAdvancesRes,
+      workerPaymentsRes,
       linksRes,
       summaryRes,
       priceListRes,
@@ -455,8 +493,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       supabase.from('quotation_payments').select('*').order('payment_date', { ascending: false }),
       supabase.from('expenses').select('*').is('vendor_id', null).order('created_at', { ascending: false }),
       supabase.from('vendor_purchases_effective').select('*').order('expense_date', { ascending: false }),
+      supabase.from('vendor_payments').select('*').order('payment_date', { ascending: false }),
       supabase.from('monthly_revenue_expense').select('*'),
       supabase.from('worker_month_summary').select('*').order('name'),
+      supabase.from('worker_advances').select('*').order('advance_date', { ascending: false }),
+      supabase.from('worker_payments').select('*').order('payment_date', { ascending: false }),
       supabase.from('important_links').select('*').order('sort_order'),
       supabase.from('dashboard_summary').select('*').single(),
       supabase.from('price_list').select('*').order('sort_order'),
@@ -484,8 +525,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (quotationPaymentsRes.data) setQuotationPayments(quotationPaymentsRes.data.map(mapQuotationPayment));
     if (expensesRes.data) setExpenses(expensesRes.data.map(mapExpense));
     if (vendorPurchasesRes.data) setVendorPurchases(vendorPurchasesRes.data.map(mapVendorPurchase));
+    if (vendorPaymentsRes.data) setVendorPayments(vendorPaymentsRes.data.map(mapVendorPayment));
     if (monthlyRes.data) setMonthlyFigures(monthlyRes.data.map(mapMonthlyFigure));
     if (workersRes.data) setWorkers(workersRes.data.map(mapWorker));
+    if (workerAdvancesRes.data) setWorkerAdvances(workerAdvancesRes.data.map(mapWorkerAdvance));
+    if (workerPaymentsRes.data) setWorkerPayments(workerPaymentsRes.data.map(mapWorkerPayment));
     if (linksRes.data) setLinks(linksRes.data.map(mapImportantLink));
     if (summaryRes.data) setDashboardSummary(mapDashboardSummary(summaryRes.data));
     if (priceListRes.data) setPriceList(priceListRes.data.map(mapPriceListItem));
@@ -511,6 +555,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     setDataLoading(false);
+    setHasLoadedOnce(true);
   }, []);
 
   // ---------- Auth bootstrap ----------
@@ -520,8 +565,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setAuthLoading(false);
     });
 
+    // supabase-js re-fires this on every tab refocus (a background token
+    // refresh check), even when it's the exact same signed-in user — not
+    // just on real sign-in/sign-out. Replacing `session` with a new object
+    // reference every time was triggering a full loadAllData() re-fetch
+    // (see the effect below) purely from switching tabs and back, which
+    // in turn was unmounting the whole page tree — see dataLoading/
+    // hasLoadedOnce in ProtectedShell (App.tsx). Only update session when
+    // the signed-in user actually changes.
     const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
+      setSession((prev) => (prev?.user?.id === newSession?.user?.id ? prev : newSession));
     });
 
     return () => listener.subscription.unsubscribe();
@@ -683,7 +736,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       p_note: note || null,
     });
     if (error) return;
-    await Promise.all([refreshVendorPurchases(), refreshVendors()]);
+    await Promise.all([refreshVendorPurchases(), refreshVendors(), refreshVendorPayments()]);
   };
 
   // ---------- Vendor slips (DC) ----------
@@ -697,7 +750,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const { data: slipRow, error: slipErr } = await supabase
       .from('vendor_slips')
-      .insert({ vendor_id: input.vendorId, care_of: input.careOf })
+      .insert({ vendor_id: input.vendorId, care_of: input.careOf, customer_name: input.customerName?.trim() || null })
       .select()
       .single();
     if (slipErr || !slipRow) return null;
@@ -1080,9 +1133,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       name: data.name,
       monthlySalary: Number(data.monthly_salary),
       advancesThisMonth: 0,
+      paidThisMonth: 0,
       remainingThisMonth: Number(data.monthly_salary),
     };
     setWorkers((prev) => [...prev, newWorker].sort((a, b) => a.name.localeCompare(b.name)));
+  };
+
+  const updateWorker = async (workerId: string, input: NewWorkerInput) => {
+    const { error } = await supabase
+      .from('workers')
+      .update({ name: input.name, monthly_salary: input.monthlySalary })
+      .eq('id', workerId);
+    if (error) return;
+    await refreshWorkers();
   };
 
   const logWorkerAdvance = async (input: NewWorkerAdvanceInput) => {
@@ -1093,7 +1156,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       p_note: input.note ?? '',
     });
     if (error) return;
-    await Promise.all([refreshWorkers(), refreshExpenses()]);
+    await Promise.all([refreshWorkers(), refreshExpenses(), refreshWorkerAdvances()]);
+  };
+
+  // Records a salary SETTLEMENT payment — distinct from an advance. Always
+  // creates a matching expense row (same pattern as advances), so total
+  // payroll spend shows up correctly in Expenses/Reports.
+  const recordWorkerPayment = async (workerId: string, amount: number, date: string, forMonth: string, note?: string) => {
+    const { error } = await supabase.rpc('record_worker_payment', {
+      p_worker_id: workerId,
+      p_amount: amount,
+      p_date: date,
+      p_for_month: forMonth,
+      p_note: note || null,
+    });
+    if (error) return;
+    await Promise.all([refreshWorkers(), refreshExpenses(), refreshWorkerPayments()]);
   };
 
   // ---------- Important Links ----------
@@ -1159,6 +1237,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       expenses,
       addExpense,
       vendorPurchases,
+      vendorPayments,
       addVendorPurchase,
       recordVendorPayment,
       vendorSlips,
@@ -1181,7 +1260,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       recordQuotationPayment,
       workers,
       addWorker,
+      updateWorker,
+      workerAdvances,
       logWorkerAdvance,
+      workerPayments,
+      recordWorkerPayment,
       links,
       addLink,
       priceList,
@@ -1237,8 +1320,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setEditingQuotationId(null);
       },
       isWorkerModalOpen,
-      openWorkerModal: () => setWorkerModalOpen(true),
-      closeWorkerModal: () => setWorkerModalOpen(false),
+      editingWorkerId,
+      openWorkerModal: () => {
+        setEditingWorkerId(null);
+        setWorkerModalOpen(true);
+      },
+      openEditWorkerModal: (workerId: string) => {
+        setEditingWorkerId(workerId);
+        setWorkerModalOpen(true);
+      },
+      closeWorkerModal: () => {
+        setWorkerModalOpen(false);
+        setEditingWorkerId(null);
+      },
       isAdvanceModalOpen,
       advanceModalWorkerId,
       openAdvanceModal: (workerId?: string) => {
@@ -1263,6 +1357,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       closePaymentReceipt: () => setPaymentReceipt(null),
       authLoading,
       dataLoading,
+      hasLoadedOnce,
       isAuthenticated,
       currentUserName,
       login,
@@ -1274,6 +1369,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       vendors,
       expenses,
       vendorPurchases,
+      vendorPayments,
       vendorSlips,
       purchaseBills,
       invoices,
@@ -1282,6 +1378,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       monthlyFigures,
       dashboardSummary,
       workers,
+      workerAdvances,
+      workerPayments,
       links,
       priceList,
       isCustomerModalOpen,
@@ -1293,6 +1391,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       quotationModalCustomerId,
       editingQuotationId,
       isWorkerModalOpen,
+      editingWorkerId,
       isAdvanceModalOpen,
       advanceModalWorkerId,
       isLinkModalOpen,
@@ -1302,6 +1401,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       paymentReceipt,
       authLoading,
       dataLoading,
+      hasLoadedOnce,
       isAuthenticated,
       currentUserName,
     ]

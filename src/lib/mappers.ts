@@ -9,9 +9,12 @@ import type {
   MonthlyFigure,
   ExpenseCategory,
   Worker,
+  WorkerAdvance,
+  WorkerPayment,
   ImportantLink,
   DashboardSummary,
   VendorPurchase,
+  VendorPayment,
   PriceListItem,
   VendorSlip,
   VendorSlipItem,
@@ -163,7 +166,29 @@ export function mapWorker(row: any): Worker {
     name: row.name,
     monthlySalary: Number(row.monthly_salary),
     advancesThisMonth: Number(row.advances_this_month ?? 0),
+    paidThisMonth: Number(row.paid_this_month ?? 0),
     remainingThisMonth: Number(row.remaining_this_month ?? row.monthly_salary),
+  };
+}
+
+export function mapWorkerAdvance(row: any): WorkerAdvance {
+  return {
+    id: row.id,
+    workerId: row.worker_id,
+    amount: Number(row.amount),
+    date: row.advance_date,
+    note: row.note ?? undefined,
+  };
+}
+
+export function mapWorkerPayment(row: any): WorkerPayment {
+  return {
+    id: row.id,
+    workerId: row.worker_id,
+    amount: Number(row.amount),
+    paymentDate: row.payment_date,
+    forMonth: row.for_month,
+    note: row.note ?? null,
   };
 }
 
@@ -200,6 +225,17 @@ export function mapVendorPurchase(row: any): VendorPurchase {
   };
 }
 
+export function mapVendorPayment(row: any): VendorPayment {
+  return {
+    id: row.id,
+    expenseId: row.expense_id,
+    amount: Number(row.amount),
+    paymentDate: row.payment_date,
+    note: row.note ?? null,
+    createdAt: row.created_at,
+  };
+}
+
 export function mapPriceListItem(row: any): PriceListItem {
   return {
     id: row.id,
@@ -230,6 +266,7 @@ export function mapVendorSlip(row: any, items: VendorSlipItem[] = []): VendorSli
     dcNo: row.dc_no,
     vendorId: row.vendor_id,
     careOf: row.care_of,
+    customerName: row.customer_name ?? null,
     status: row.status,
     slipDate: row.slip_date,
     pricedAt: row.priced_at ?? null,

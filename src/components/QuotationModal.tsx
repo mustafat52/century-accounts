@@ -131,48 +131,6 @@ function defaultValidUntil(): string {
   return d.toISOString().slice(0, 10);
 }
 
-// ---- Fuzzy customer-name matching (plain Levenshtein, no dependency) ----
-// Same helper as InvoiceModal — duplicated rather than shared, since it's
-// small and each modal's usage needs to stay independently correct. Catches
-// near-misses like "Grand Vista Hotel" vs the real "Grand Vista Hotels"
-// before they silently become a duplicate customer.
-function levenshtein(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
-    }
-  }
-  return dp[m][n];
-}
-
-const normalizeName = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
-
-function findFuzzyCustomerMatch(typed: string, customers: { id: string; name: string }[]) {
-  const norm = normalizeName(typed);
-  if (norm.length < 3) return null; // too short to mean anything, avoid noisy hints while typing
-  let best: { id: string; name: string } | null = null;
-  let bestDist = Infinity;
-  for (const c of customers) {
-    const cn = normalizeName(c.name);
-    if (cn === norm) return null; // exact match — no hint needed, this is handled elsewhere
-    const dist = levenshtein(norm, cn);
-    const threshold = Math.max(2, Math.floor(cn.length * 0.25)); // allow ~25% of the name to differ
-    if (dist <= threshold && dist < bestDist) {
-      best = c;
-      bestDist = dist;
-    }
-  }
-  return best;
-}
-
 const money = (n: number) => `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
 export default function QuotationModal() {
@@ -182,7 +140,6 @@ export default function QuotationModal() {
     editingQuotationId,
     closeQuotationModal,
     customers,
-    addCustomer,
     quotations,
     addQuotation,
     updateQuotation,
@@ -191,7 +148,12 @@ export default function QuotationModal() {
     priceList,
   } = useApp();
 
-  const [customerName, setCustomerName] = useState('');
+  // Quotations can only ever be linked to a customer already in the
+  // system — if someone new walks in, their profile gets created first
+  // (Customers page), then picked here. No more typing a brand-new name
+  // to create-on-the-fly, so this is a plain select bound to a real id,
+  // not free text.
+  const [customerId, setCustomerId] = useState('');
   const [validUntil, setValidUntil] = useState(defaultValidUntil());
   const [slab, setSlab] = useState<InvoiceSlab>('A');
   const [customDiscount, setCustomDiscount] = useState('0');
@@ -210,8 +172,7 @@ export default function QuotationModal() {
   useEffect(() => {
     if (isQuotationModalOpen && !wasOpenRef.current) {
       if (editingQuotation) {
-        const existing = customers.find((c) => c.id === editingQuotation.customerId);
-        setCustomerName(existing?.name ?? '');
+        setCustomerId(editingQuotation.customerId);
         setValidUntil(editingQuotation.validUntil);
         setSlab(editingQuotation.slab);
         setCustomDiscount(editingQuotation.slab === 'A' ? String(editingQuotation.discountPercent) : '0');
@@ -226,8 +187,7 @@ export default function QuotationModal() {
           setActiveTab(draftItems.some((it) => it.type === 'glass') ? 'glass' : 'simple');
         });
       } else {
-        const preset = quotationModalCustomerId ? customers.find((c) => c.id === quotationModalCustomerId) : null;
-        setCustomerName(preset?.name ?? '');
+        setCustomerId(quotationModalCustomerId ?? '');
         setValidUntil(defaultValidUntil());
         setSlab('A');
         setCustomDiscount('0');
@@ -330,8 +290,7 @@ export default function QuotationModal() {
   // which never auto-added rows so requiring every row to be valid was
   // safe there).
   const realItems = items.filter(isItemValid);
-  const fuzzyCustomerMatch = findFuzzyCustomerMatch(customerName, customers);
-  const isValid = customerName.trim() && validUntil && realItems.length > 0;
+  const isValid = customerId && validUntil && realItems.length > 0;
 
   // Counts shown on the tab labels — valid/filled items only, so the
   // trailing auto-added blank draft row of each type never counts.
@@ -342,25 +301,6 @@ export default function QuotationModal() {
   const handleSave = async () => {
     if (!isValid || saving) return;
     setSaving(true);
-
-    // Match against existing customers by name (case-insensitive, exact) —
-    // same shortcut pattern as InvoiceModal and the product datalist. No
-    // match means this is a new customer: create them with just the typed
-    // name, contact info can be filled in later from the Customers page.
-    // The customer field is disabled while editing, so this always
-    // resolves back to the same existing customer in that case.
-    const trimmedName = customerName.trim();
-    const existing = customers.find((c) => c.name.trim().toLowerCase() === trimmedName.toLowerCase());
-    let customerId = existing?.id ?? null;
-
-    if (!customerId) {
-      const created = await addCustomer({ name: trimmedName });
-      if (!created) {
-        setSaving(false);
-        return;
-      }
-      customerId = created.id;
-    }
 
     const payloadItems: NewQuotationItemInput[] = realItems.map((it) =>
       it.type === 'glass'
@@ -411,30 +351,19 @@ export default function QuotationModal() {
           <div className="form-row">
             <div className="form-field">
               <label>Customer</label>
-              <input
-                type="text"
-                list="customer-options"
-                value={customerName}
-                onChange={(e) => setCustomerName(capitalizeFirst(e.target.value))}
-                placeholder="Pick a customer or type a new name"
-                disabled={!!editingQuotationId}
-              />
-              <datalist id="customer-options">
+              <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} disabled={!!editingQuotationId}>
+                <option value="" disabled>
+                  Select a customer…
+                </option>
                 {customers.map((c) => (
-                  <option key={c.id} value={c.name} />
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
                 ))}
-              </datalist>
-              {fuzzyCustomerMatch && !editingQuotationId && (
+              </select>
+              {customers.length === 0 && (
                 <div className="row-sub" style={{ marginTop: 4 }}>
-                  Did you mean{' '}
-                  <button
-                    type="button"
-                    className="inline-suggest-link"
-                    onClick={() => setCustomerName(fuzzyCustomerMatch.name)}
-                  >
-                    {fuzzyCustomerMatch.name}
-                  </button>
-                  ? (existing customer)
+                  No customers yet — add one from the Customers page first.
                 </div>
               )}
             </div>
@@ -539,15 +468,17 @@ export default function QuotationModal() {
                           </option>
                         ))}
                       </select>
-                      {!priceList.some((p) => p.description === item.description) && (
-                        <input
-                          type="text"
-                          value={item.description}
-                          onChange={(e) => updateItem(item.key, { description: capitalizeFirst(e.target.value) })}
-                          placeholder="e.g. Grey mirror + CP"
-                          style={{ marginTop: 6 }}
-                        />
-                      )}
+                      {/* Always visible, even right after picking a price-list
+                          entry — the picked text lands here and stays freely
+                          editable, since a description often needs a bit more
+                          added to it than just the catalog name. */}
+                      <input
+                        type="text"
+                        value={item.description}
+                        onChange={(e) => updateItem(item.key, { description: capitalizeFirst(e.target.value) })}
+                        placeholder="e.g. Grey mirror + CP"
+                        style={{ marginTop: 6 }}
+                      />
                     </div>
                     <div className="form-field">
                       <label>Thickness (mm)</label>

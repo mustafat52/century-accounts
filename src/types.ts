@@ -138,6 +138,18 @@ export interface Expense {
 
 export type VendorPaymentStatus = 'unpaid' | 'partial' | 'paid';
 
+// A single payment recorded against a vendor purchase (an expenses row
+// with vendor_id set) — used to render the Payment History box on a
+// vendor's detail page, same spirit as QuotationPayment on the billing side.
+export interface VendorPayment {
+  id: string;
+  expenseId: string;
+  amount: number;
+  paymentDate: string;
+  note: string | null;
+  createdAt: string;
+}
+
 export interface VendorPurchase {
   id: string; // expense row id
   vendorId: string;
@@ -174,6 +186,12 @@ export interface VendorSlip {
   dcNo: string; // e.g. "DC-501" — one sequence shared across all vendors
   vendorId: string;
   careOf: CareOf;
+  // Optional free text — which customer's job this material purchase is
+  // for, if any. Plain text, not linked to the customers table: it can be
+  // anyone, including someone who was never added as a real customer.
+  // Purely a reference tag: doesn't touch billing, payments, or any
+  // customer's own balances in any way.
+  customerName: string | null;
   status: VendorSlipStatus;
   slipDate: string;
   pricedAt: string | null;
@@ -264,6 +282,7 @@ export interface Worker {
   name: string;
   monthlySalary: number;
   advancesThisMonth: number;
+  paidThisMonth: number;
   remainingThisMonth: number;
 }
 
@@ -273,6 +292,18 @@ export interface WorkerAdvance {
   amount: number;
   date: string;
   note?: string;
+}
+
+// A salary SETTLEMENT payment — distinct from an advance. forMonth is
+// which month's salary this settles (not necessarily the same as the
+// calendar date it was actually paid on).
+export interface WorkerPayment {
+  id: string;
+  workerId: string;
+  amount: number;
+  paymentDate: string;
+  forMonth: string;
+  note: string | null;
 }
 
 export interface ImportantLink {

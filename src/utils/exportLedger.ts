@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import type { Customer, Invoice, Quotation, QuotationPayment } from '../types';
+import type { Customer, Invoice, Quotation, QuotationPayment, Worker, WorkerAdvance, WorkerPayment, Expense, VendorPurchase, Vendor } from '../types';
 import { PAYMENT_METHOD_LABELS } from '../types';
 import { formatINR } from './format';
 
@@ -148,4 +148,137 @@ export function exportAllCustomersLedger(
   });
 
   XLSX.writeFile(wb, 'Century_Glass_Art_All_Customer_Ledgers.xlsx');
+}
+
+// ============================================================
+// Worker / Payslips ledger — same one-sheet narrative style as the
+// customer ledger: every advance and every salary settlement payment,
+// in one combined chronological table, oldest first.
+// ============================================================
+
+type WorkerLedgerRow = [string, string, number, string, string];
+
+const WORKER_HEADER_ROW: (string | number)[] = ['Date', 'Type', 'Amount', 'For Month', 'Note'];
+
+function workerLedgerRows(
+  worker: Worker,
+  advances: WorkerAdvance[],
+  payments: WorkerPayment[]
+): { rows: WorkerLedgerRow[]; totalAdvances: number; totalPaid: number } {
+  const ownAdvances = advances.filter((a) => a.workerId === worker.id);
+  const ownPayments = payments.filter((p) => p.workerId === worker.id);
+
+  type Event = { date: string; type: string; amount: number; forMonth: string; note: string };
+  const events: Event[] = [
+    ...ownAdvances.map((a) => ({ date: a.date, type: 'Advance', amount: a.amount, forMonth: '', note: a.note ?? '' })),
+    ...ownPayments.map((p) => ({
+      date: p.paymentDate,
+      type: 'Salary Settlement',
+      amount: p.amount,
+      forMonth: p.forMonth,
+      note: p.note ?? '',
+    })),
+  ].sort((a, b) => (a.date < b.date ? -1 : 1));
+
+  const rows: WorkerLedgerRow[] = events.map((e) => [e.date, e.type, e.amount, e.forMonth, e.note]);
+  const totalAdvances = ownAdvances.reduce((sum, a) => sum + a.amount, 0);
+  const totalPaid = ownPayments.reduce((sum, p) => sum + p.amount, 0);
+
+  return { rows, totalAdvances, totalPaid };
+}
+
+function workerSheet(worker: Worker, advances: WorkerAdvance[], payments: WorkerPayment[]) {
+  const { rows, totalAdvances, totalPaid } = workerLedgerRows(worker, advances, payments);
+
+  const aoa: (WorkerLedgerRow | (string | number)[])[] = [
+    ['Worker', worker.name],
+    ['Monthly Salary', formatINR(worker.monthlySalary)],
+    [],
+    ['This Month — Advances', formatINR(worker.advancesThisMonth)],
+    ['This Month — Paid', formatINR(worker.paidThisMonth)],
+    ['This Month — Remaining', formatINR(worker.remainingThisMonth)],
+    [],
+    WORKER_HEADER_ROW,
+    ...rows,
+    [],
+    ['', 'Total Advances (all time)', totalAdvances, '', ''],
+    ['', 'Total Settlements Paid (all time)', totalPaid, '', ''],
+  ];
+
+  return XLSX.utils.aoa_to_sheet(aoa);
+}
+
+export function exportWorkerLedger(worker: Worker, advances: WorkerAdvance[], payments: WorkerPayment[]) {
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, workerSheet(worker, advances, payments), 'Ledger');
+  XLSX.writeFile(wb, `${worker.name.replace(/\s+/g, '_')}_Ledger.xlsx`);
+}
+
+export function exportAllWorkersLedger(workers: Worker[], advances: WorkerAdvance[], payments: WorkerPayment[]) {
+  const wb = XLSX.utils.book_new();
+
+  const overview = workers.map((w) => ({
+    Worker: w.name,
+    'Monthly Salary': w.monthlySalary,
+    'Advances This Month': w.advancesThisMonth,
+    'Paid This Month': w.paidThisMonth,
+    'Remaining This Month': w.remainingThisMonth,
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(overview), 'All Workers');
+
+  const usedNames = new Set<string>(['All Workers']);
+  workers.forEach((w) => {
+    const sheetName = safeSheetName(w.name, usedNames);
+    XLSX.utils.book_append_sheet(wb, workerSheet(w, advances, payments), sheetName);
+  });
+
+  XLSX.writeFile(wb, 'Century_Glass_Art_All_Worker_Ledgers.xlsx');
+}
+
+// ============================================================
+// General expense report — every expense the business has recorded,
+// general (Rent/Utilities/etc) AND vendor purchases together, since both
+// live in the same underlying expenses table and this is meant to be the
+// complete picture, not just one slice of it.
+// ============================================================
+
+export function exportAllExpenses(expenses: Expense[], vendorPurchases: VendorPurchase[], vendors: Vendor[]) {
+  const vendorName = (id: string) => vendors.find((v) => v.id === id)?.name ?? 'Unknown vendor';
+
+  type Row = { date: string; category: string; description: string; vendor: string; amount: number };
+  const rows: Row[] = [
+    ...expenses.map((e) => ({ date: e.date, category: e.category, description: e.description, vendor: '—', amount: e.amount })),
+    ...vendorPurchases.map((p) => ({
+      date: p.date,
+      category: p.category,
+      description: p.description,
+      vendor: vendorName(p.vendorId),
+      amount: p.amount,
+    })),
+  ].sort((a, b) => (a.date < b.date ? 1 : -1));
+
+  const totalsByCategory = new Map<string, number>();
+  rows.forEach((r) => totalsByCategory.set(r.category, (totalsByCategory.get(r.category) ?? 0) + r.amount));
+  const grandTotal = rows.reduce((sum, r) => sum + r.amount, 0);
+
+  const wb = XLSX.utils.book_new();
+
+  const summaryAoa: (string | number)[][] = [
+    ['Category', 'Total'],
+    ...Array.from(totalsByCategory.entries()).sort((a, b) => b[1] - a[1]),
+    [],
+    ['Grand Total', grandTotal],
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryAoa), 'Summary');
+
+  const detailData = rows.map((r) => ({
+    Date: r.date,
+    Category: r.category,
+    Description: r.description,
+    Vendor: r.vendor,
+    Amount: r.amount,
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detailData), 'All Expenses');
+
+  XLSX.writeFile(wb, 'Century_Glass_Art_Expense_Report.xlsx');
 }

@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import Topbar from '../components/Topbar';
 import VendorModal from '../components/VendorModal';
-import VendorPurchaseModal from '../components/VendorPurchaseModal';
 import VendorPaymentModal from '../components/VendorPaymentModal';
 import VendorSlipModal from '../components/VendorSlipModal';
 import PriceSlipModal from '../components/PriceSlipModal';
@@ -17,6 +16,7 @@ interface HistoryRow {
   date: string;
   dcNo: string | null;
   careOf: string | null;
+  customerName: string | null;
   description: string;
   category: string | null;
   purchase: VendorPurchase | null;
@@ -24,9 +24,9 @@ interface HistoryRow {
 }
 
 export default function Vendors() {
-  const { vendors, vendorPurchases, vendorSlips, openVendorModal, openEditVendorModal, openPrint } = useApp();
+  const { vendors, vendorPurchases, vendorPayments, vendorSlips, openVendorModal, openEditVendorModal, openPrint } =
+    useApp();
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
-  const [purchaseModalVendorId, setPurchaseModalVendorId] = useState<string | null>(null);
   const [slipModalVendorId, setSlipModalVendorId] = useState<string | null>(null);
   const [paymentVendorId, setPaymentVendorId] = useState<string | null>(null);
   const [pricingSlip, setPricingSlip] = useState<VendorSlip | null>(null);
@@ -58,6 +58,7 @@ export default function Vendors() {
           date: p.date,
           dcNo: slip?.dcNo ?? null,
           careOf: slip?.careOf ?? null,
+          customerName: slip?.customerName ?? null,
           description: p.description,
           category: p.category,
           purchase: p,
@@ -72,6 +73,7 @@ export default function Vendors() {
         date: s.slipDate,
         dcNo: s.dcNo,
         careOf: s.careOf,
+        customerName: s.customerName,
         description: `${s.items.length} item${s.items.length !== 1 ? 's' : ''} — ${s.items
           .slice(0, 2)
           .map((it) => it.description)
@@ -83,6 +85,17 @@ export default function Vendors() {
 
     return [...purchaseRows, ...pendingSlipRows].sort((a, b) => (a.date < b.date ? 1 : -1));
   }, [selectedVendorId, vendorPurchases, vendorSlips, slipByExpenseId]);
+
+  // vendor_payments rows only carry an expense_id, not a vendor_id
+  // directly — vendorPurchases (already vendor-scoped) gives us the
+  // expense-id -> vendor mapping to filter by without a separate query.
+  const vendorPaymentHistory = useMemo(() => {
+    if (!selectedVendorId) return [];
+    const expenseIds = new Set(vendorPurchases.filter((p) => p.vendorId === selectedVendorId).map((p) => p.id));
+    return vendorPayments
+      .filter((p) => expenseIds.has(p.expenseId))
+      .sort((a, b) => (a.paymentDate < b.paymentDate ? 1 : -1));
+  }, [selectedVendorId, vendorPurchases, vendorPayments]);
 
   if (selectedVendor) {
     return (
@@ -125,9 +138,6 @@ export default function Vendors() {
             <div className="panel-head">
               <h3>Purchase history</h3>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn btn-ghost btn-small desktop-only" onClick={() => setPurchaseModalVendorId(selectedVendor.id)}>
-                  + Record Purchase
-                </button>
                 <button className="btn btn-primary btn-small desktop-only" onClick={() => setSlipModalVendorId(selectedVendor.id)}>
                   + New Slip
                 </button>
@@ -138,7 +148,7 @@ export default function Vendors() {
                 <tr>
                   <th>Date</th>
                   <th>DC No.</th>
-                  <th>Description</th>
+                  <th>Customer</th>
                   <th>Category</th>
                   <th>Amount</th>
                   <th>Status</th>
@@ -159,7 +169,7 @@ export default function Vendors() {
                         <span className="row-sub">—</span>
                       )}
                     </td>
-                    <td>{row.description}</td>
+                    <td className="row-sub">{row.customerName || '—'}</td>
                     <td className="row-sub">{row.category}</td>
                     <td className="num">
                       {row.purchase ? (
@@ -224,9 +234,37 @@ export default function Vendors() {
               </tbody>
             </table>
           </div>
+
+          <div className="panel">
+            <div className="panel-head">
+              <h3>Payment history</h3>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Amount</th>
+                  <th>Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {vendorPaymentHistory.length === 0 && (
+                  <tr>
+                    <td className="row-sub">No payments recorded yet.</td>
+                  </tr>
+                )}
+                {vendorPaymentHistory.map((p) => (
+                  <tr key={p.id}>
+                    <td className="row-sub">{p.paymentDate}</td>
+                    <td className="num">{formatINR(p.amount)}</td>
+                    <td className="row-sub">{p.note || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        <VendorPurchaseModal vendorId={purchaseModalVendorId} onClose={() => setPurchaseModalVendorId(null)} />
         <VendorSlipModal vendorId={slipModalVendorId} onClose={() => setSlipModalVendorId(null)} />
         <VendorPaymentModal vendor={paymentVendor} onClose={() => setPaymentVendorId(null)} />
         <PriceSlipModal slip={pricingSlip} onClose={() => setPricingSlip(null)} />
@@ -300,7 +338,6 @@ export default function Vendors() {
         </div>
       </div>
       <VendorModal />
-      <VendorPurchaseModal vendorId={purchaseModalVendorId} onClose={() => setPurchaseModalVendorId(null)} />
     </>
   );
 }

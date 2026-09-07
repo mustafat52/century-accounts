@@ -5,32 +5,69 @@ import { capitalizeFirst } from '../utils/format';
 
 const CARE_OF_OPTIONS: CareOf[] = ['Shabbir Bhai', 'Abdul Hussain Bhai', 'Taqi Bhai'];
 
+// Slips no longer collect a unit at all — the field added friction for no
+// real benefit, since quantities are always understood in context (pcs,
+// box, etc. read naturally off the description). Every slip item still
+// needs SOME unit value for the (not-null) database column, so this fixed
+// default is submitted silently underneath.
+const DEFAULT_UNIT = 'pcs';
+
 interface DraftItem {
   key: string;
   description: string;
   quantity: string;
-  unit: string;
 }
 
 let draftKeyCounter = 0;
 function blankItem(): DraftItem {
   draftKeyCounter += 1;
-  return { key: `slip-item-${draftKeyCounter}`, description: '', quantity: '', unit: '' };
+  return { key: `slip-item-${draftKeyCounter}`, description: '', quantity: '' };
+}
+
+function isItemValid(it: DraftItem): boolean {
+  return Boolean(it.description.trim() && (parseFloat(it.quantity) || 0) > 0);
 }
 
 export default function VendorSlipModal({ vendorId, onClose }: { vendorId: string | null; onClose: () => void }) {
-  const { addVendorSlip, openPrint } = useApp();
+  const { vendors, addVendorSlip, openPrint } = useApp();
 
   const [careOf, setCareOf] = useState<CareOf>('Shabbir Bhai');
+  // Optional free text — which customer this material purchase is for, if
+  // any. Not tied to the customers list at all: can be anyone, including
+  // someone never added as a real customer. Pure reference tag, doesn't
+  // touch billing/payments in any way.
+  const [customerName, setCustomerName] = useState('');
   const [items, setItems] = useState<DraftItem[]>([blankItem()]);
   const [saving, setSaving] = useState(false);
+
+  const vendor = vendorId ? vendors.find((v) => v.id === vendorId) : undefined;
 
   useEffect(() => {
     if (vendorId) {
       setCareOf('Shabbir Bhai');
+      setCustomerName('');
       setItems([blankItem()]);
     }
   }, [vendorId]);
+
+  // Auto-add: the moment the last row becomes fully valid, silently
+  // append a fresh blank row — same pattern as Invoice/Quotation items,
+  // so entering several products in a row never requires clicking
+  // "+ Add Item" in between.
+  useEffect(() => {
+    if (items.length === 0) return;
+    const last = items[items.length - 1];
+    if (isItemValid(last)) {
+      setItems((prev) => {
+        const prevLast = prev[prev.length - 1];
+        if (prevLast && prevLast.key === last.key) {
+          return [...prev, blankItem()];
+        }
+        return prev;
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
 
   if (!vendorId) return null;
 
@@ -42,7 +79,6 @@ export default function VendorSlipModal({ vendorId, onClose }: { vendorId: strin
     setItems((prev) => (prev.length > 1 ? prev.filter((it) => it.key !== key) : prev));
   };
 
-  const isItemValid = (it: DraftItem) => it.description.trim() && (parseFloat(it.quantity) || 0) > 0 && it.unit.trim();
   const realItems = items.filter(isItemValid);
   const isValid = realItems.length > 0;
 
@@ -52,10 +88,11 @@ export default function VendorSlipModal({ vendorId, onClose }: { vendorId: strin
     const slip = await addVendorSlip({
       vendorId,
       careOf,
+      customerName: customerName.trim() || null,
       items: realItems.map((it) => ({
         description: it.description.trim(),
         quantity: parseFloat(it.quantity) || 0,
-        unit: it.unit.trim(),
+        unit: DEFAULT_UNIT,
       })),
     });
     setSaving(false);
@@ -84,6 +121,10 @@ export default function VendorSlipModal({ vendorId, onClose }: { vendorId: strin
 
           <div className="form-row">
             <div className="form-field">
+              <label>Vendor</label>
+              <input type="text" disabled value={vendor?.name ?? '—'} />
+            </div>
+            <div className="form-field">
               <label>Care of</label>
               <select value={careOf} onChange={(e) => setCareOf(e.target.value as CareOf)}>
                 {CARE_OF_OPTIONS.map((c) => (
@@ -92,6 +133,15 @@ export default function VendorSlipModal({ vendorId, onClose }: { vendorId: strin
                   </option>
                 ))}
               </select>
+            </div>
+            <div className="form-field">
+              <label>Customer (optional)</label>
+              <input
+                type="text"
+                value={customerName}
+                onChange={(e) => setCustomerName(capitalizeFirst(e.target.value))}
+                placeholder="e.g. Alekhya, or any name — not tied to the customers list"
+              />
             </div>
           </div>
 
@@ -103,15 +153,13 @@ export default function VendorSlipModal({ vendorId, onClose }: { vendorId: strin
             <table className="item-table">
               <colgroup>
                 <col />
-                <col style={{ width: 110 }} />
-                <col style={{ width: 110 }} />
+                <col style={{ width: 120 }} />
                 <col style={{ width: 32 }} />
               </colgroup>
               <thead>
                 <tr>
                   <th>Description</th>
                   <th className="num">Quantity</th>
-                  <th>Unit</th>
                   <th></th>
                 </tr>
               </thead>
@@ -132,14 +180,6 @@ export default function VendorSlipModal({ vendorId, onClose }: { vendorId: strin
                         value={item.quantity}
                         onChange={(e) => updateItem(item.key, { quantity: e.target.value })}
                         placeholder="0"
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="text"
-                        value={item.unit}
-                        onChange={(e) => updateItem(item.key, { unit: capitalizeFirst(e.target.value) })}
-                        placeholder="e.g. pcs, box"
                       />
                     </td>
                     <td>

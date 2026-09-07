@@ -21,7 +21,7 @@ import WasteLedger from './pages/inventory/WasteLedger';
 import CuttingPlan from './pages/inventory/CuttingPlan';
 
 function ProtectedShell() {
-  const { isAuthenticated, authLoading, dataLoading } = useApp();
+  const { isAuthenticated, authLoading, dataLoading, hasLoadedOnce } = useApp();
 
   if (authLoading) {
     return (
@@ -40,7 +40,7 @@ function ProtectedShell() {
       <Sidebar />
       <MobileNav />
       <main className="main">
-        {dataLoading ? (
+        {dataLoading && !hasLoadedOnce ? (
           <div style={{ padding: 40, color: 'var(--text-muted)' }}>Loading business data…</div>
         ) : (
           <Routes>

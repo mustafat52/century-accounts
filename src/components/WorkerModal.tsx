@@ -3,24 +3,31 @@ import { useApp } from '../context/AppContext';
 import { capitalizeFirst } from '../utils/format';
 
 export default function WorkerModal() {
-  const { isWorkerModalOpen, closeWorkerModal, addWorker } = useApp();
+  const { isWorkerModalOpen, editingWorkerId, closeWorkerModal, addWorker, updateWorker, workers } = useApp();
 
   const [name, setName] = useState('');
   const [salary, setSalary] = useState('');
 
+  const editingWorker = editingWorkerId ? workers.find((w) => w.id === editingWorkerId) : null;
+
   useEffect(() => {
     if (isWorkerModalOpen) {
-      setName('');
-      setSalary('');
+      setName(editingWorker?.name ?? '');
+      setSalary(editingWorker ? String(editingWorker.monthlySalary) : '');
     }
-  }, [isWorkerModalOpen]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isWorkerModalOpen, editingWorkerId]);
 
   if (!isWorkerModalOpen) return null;
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const salaryNum = parseFloat(salary) || 0;
     if (!name || salaryNum <= 0) return;
-    addWorker({ name, monthlySalary: salaryNum });
+    if (editingWorkerId) {
+      await updateWorker(editingWorkerId, { name, monthlySalary: salaryNum });
+    } else {
+      await addWorker({ name, monthlySalary: salaryNum });
+    }
     closeWorkerModal();
   };
 
@@ -28,7 +35,7 @@ export default function WorkerModal() {
     <div className="modal-overlay is-open">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <h2>New Worker</h2>
+          <h2>{editingWorkerId ? 'Edit Worker' : 'New Worker'}</h2>
           <button className="modal-close" onClick={closeWorkerModal}>
             &times;
           </button>
@@ -54,7 +61,7 @@ export default function WorkerModal() {
             Cancel
           </button>
           <button className="btn btn-primary" onClick={handleSave}>
-            Save worker
+            {editingWorkerId ? 'Save changes' : 'Save worker'}
           </button>
         </div>
       </div>
