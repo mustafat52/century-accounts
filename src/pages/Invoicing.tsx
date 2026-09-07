@@ -20,7 +20,6 @@ const STATUS_FILTERS: Array<{ key: QuotationFilter; label: string }> = [
   { key: 'overdue', label: 'Overdue' },
   { key: 'partial', label: 'Partial' },
   { key: 'paid', label: 'Paid' },
-  { key: 'expired', label: 'Expired' },
 ];
 
 export default function Invoicing() {
@@ -186,12 +185,12 @@ export default function Invoicing() {
                             Edit
                           </button>
                         )}
-                        {q.status === 'pending' && q.balanceAmount > 0 && (
+                        {q.balanceAmount > 0 && (
                           <button className="btn btn-ghost btn-small desktop-only" onClick={() => openPaymentModal(q.dbId)}>
                             Record Payment
                           </button>
                         )}
-                        {q.status === 'pending' && q.balanceAmount <= 0 && (
+                        {q.status === 'pending' && (
                           <button
                             className="btn btn-primary btn-small desktop-only"
                             onClick={() => convertQuotationToInvoice(q.dbId)}

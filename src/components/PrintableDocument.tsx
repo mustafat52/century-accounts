@@ -142,7 +142,7 @@ export default function PrintableDocument() {
     return (
       <div className="receipt-overlay">
         <div className="receipt-toolbar no-print">
-          {quotation.balanceAmount <= 0 && quotation.status === 'pending' && (
+          {quotation.status === 'pending' && (
             <button
               className="btn btn-primary"
               onClick={async () => {

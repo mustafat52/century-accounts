@@ -3,12 +3,14 @@
 //   'due'       — pending, within the 30-day clock from creation, balance > 0
 //   'overdue'   — pending, past the 30-day clock, balance > 0
 //   'paid'      — pending, balance = 0, ready to Convert to an invoice
-//   'converted' — already settled into an invoice
-//   'expired'   — pending, past valid_until, zero payments ever recorded
+//   'converted' — already settled into an invoice (may still have a
+//                 balance owing — Convert doesn't require full payment)
 // A quotation can independently be "partial" (0 < paidAmount < grandTotal)
-// regardless of due/overdue — that's shown as extra badge text derived
-// client-side from paidAmount, not a separate status value.
-export type QuotationEffectiveStatus = 'due' | 'overdue' | 'paid' | 'converted' | 'expired';
+// regardless of due/overdue/converted — that's shown as extra badge text
+// derived client-side from paidAmount, not a separate status value.
+// valid_until plays no part in this at all — it's a formality printed on
+// the quotation, never a status driver.
+export type QuotationEffectiveStatus = 'due' | 'overdue' | 'paid' | 'converted';
 
 export type InvoiceSlab = 'A' | 'B' | 'C' | 'D';
 // Invoice-level discount tier — NOT a per-item label. One slab per bill.
@@ -246,6 +248,12 @@ export interface MonthlyFigure {
   expenses: number;
 }
 
+// Mirrors the raw quotation_status DB enum exactly. 'expired' is a legacy
+// value that's never actually written by the app anymore (removed from
+// quotations_effective.effective_status — valid_until is a printed
+// formality now, not a status driver) — kept here only because dropping
+// a value from a Postgres enum type requires recreating it, which isn't
+// worth doing for an inert value.
 export type QuotationStatus = 'pending' | 'converted' | 'expired';
 
 // The living document for a job's entire lifecycle — created, negotiated,

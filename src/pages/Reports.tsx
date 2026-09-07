@@ -62,7 +62,6 @@ export default function Reports() {
       overdue: { count: 0, amount: 0 },
       paid: { count: 0, amount: 0 },
       converted: { count: 0, amount: 0 },
-      expired: { count: 0, amount: 0 },
     };
     periodQuotations.forEach((q) => {
       buckets[q.effectiveStatus].count += 1;
@@ -238,11 +237,6 @@ export default function Reports() {
                   <td><span className="badge converted">Invoiced</span></td>
                   <td className="num">{quotationStatusBreakdown.converted.count}</td>
                   <td className="num">{formatINR(quotationStatusBreakdown.converted.amount)}</td>
-                </tr>
-                <tr>
-                  <td><span className="badge expired">Expired</span></td>
-                  <td className="num">{quotationStatusBreakdown.expired.count}</td>
-                  <td className="num">{formatINR(quotationStatusBreakdown.expired.amount)}</td>
                 </tr>
               </tbody>
             </table>

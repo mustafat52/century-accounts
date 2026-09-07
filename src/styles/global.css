@@ -280,6 +280,12 @@ th {
 td {
   padding: 13px 20px;
   border-bottom: 1px solid var(--border);
+  /* Rows now vary a lot in height (multi-line amount breakdowns, wrapping
+     action buttons) — top-aligning keeps every cell's content starting at
+     the same line, so short cells (a status badge, a short description)
+     don't float in the middle of a tall row looking disconnected from the
+     row's actual divider line underneath. */
+  vertical-align: top;
 }
 
 tbody tr:last-child td { border-bottom: none; }
@@ -321,8 +327,6 @@ tbody tr:hover { background: var(--surface-2); }
 .badge.in_progress::before { background: var(--info); }
 .badge.converted { background: var(--info-dim); color: var(--info); }
 .badge.converted::before { background: var(--info); }
-.badge.expired { background: var(--surface-2); color: var(--text-muted); }
-.badge.expired::before { background: var(--text-muted); }
 .badge.partial { background: var(--partial-dim); color: var(--partial); }
 .badge.partial::before { background: var(--partial); }
 
