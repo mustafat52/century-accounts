@@ -6,9 +6,9 @@ import { formatINR } from '../utils/format';
 import type { InvoiceSlab } from '../types';
 import { SLAB_DISCOUNT_PERCENT } from '../types';
 
-type PeriodKey = 'month' | '3m' | '6m' | 'year';
+type PeriodKey = 'month' | '3m' | '6m' | 'year' | 'custom';
 
-const PERIODS: Array<{ key: PeriodKey; label: string; monthsBack: number; chartSlice: number }> = [
+const PERIODS: Array<{ key: Exclude<PeriodKey, 'custom'>; label: string; monthsBack: number; chartSlice: number }> = [
   { key: 'month', label: 'This Month', monthsBack: 0, chartSlice: 1 },
   { key: '3m', label: 'Last 3 Months', monthsBack: 2, chartSlice: 3 },
   { key: '6m', label: 'Last 6 Months', monthsBack: 5, chartSlice: 6 },
@@ -19,7 +19,7 @@ function latestDate(dates: string[]): string {
   return dates.length ? dates.reduce((a, b) => (a > b ? a : b)) : new Date().toISOString().slice(0, 10);
 }
 
-function periodStart(anchor: string, period: PeriodKey): string {
+function periodStart(anchor: string, period: Exclude<PeriodKey, 'custom'>): string {
   const [y, m] = anchor.split('-').map(Number);
   if (period === 'year') return `${y}-01-01`;
   const cfg = PERIODS.find((p) => p.key === period)!;
@@ -27,22 +27,109 @@ function periodStart(anchor: string, period: PeriodKey): string {
   return d.toISOString().slice(0, 10);
 }
 
+function currentMonthValue(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// Last calendar day of a "YYYY-MM" month value, as a "YYYY-MM-DD" string —
+// day 0 of the FOLLOWING month is a reliable way to get this in JS without
+// hand-rolling a days-in-month table (handles leap Februaries for free).
+function monthEnd(monthValue: string): string {
+  const [y, m] = monthValue.split('-').map(Number);
+  const d = new Date(y, m, 0);
+  return d.toISOString().slice(0, 10);
+}
+
+function monthStartOf(monthValue: string): string {
+  return `${monthValue}-01`;
+}
+
+// Every "YYYY-MM" month value from `from` to `to`, inclusive — used to
+// build one chart bucket per month across an arbitrary custom range,
+// however many months or years it spans.
+function monthsBetween(from: string, to: string): string[] {
+  const [fy, fm] = from.split('-').map(Number);
+  const [ty, tm] = to.split('-').map(Number);
+  const months: string[] = [];
+  let y = fy;
+  let m = fm;
+  // Safety cap — a custom range typo (e.g. picking years apart) shouldn't
+  // ever generate an unbounded array.
+  let guard = 0;
+  while ((y < ty || (y === ty && m <= tm)) && guard < 600) {
+    months.push(`${y}-${String(m).padStart(2, '0')}`);
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+    guard += 1;
+  }
+  return months;
+}
+
+function monthLabel(monthValue: string): string {
+  const [y, m] = monthValue.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+}
+
 export default function Reports() {
-  const { monthlyFigures, customers, vendors, invoices, expenses, quotations } = useApp();
+  const { monthlyFigures, customers, vendors, invoices, expenses, quotations, quotationPayments, vendorPurchases } = useApp();
   const [period, setPeriod] = useState<PeriodKey>('6m');
+  // From/To month pickers, only shown and used when period === 'custom'.
+  // Picking the same month for both (e.g. April to April) naturally gives
+  // just that one month's stats — there's no separate "single month" mode,
+  // a one-month-wide range already does that.
+  const [customFrom, setCustomFrom] = useState(currentMonthValue());
+  const [customTo, setCustomTo] = useState(currentMonthValue());
 
   const anchor = useMemo(
     () => latestDate([...invoices.map((i) => i.date), ...expenses.map((e) => e.date), ...quotations.map((q) => q.date)]),
     [invoices, expenses, quotations]
   );
 
-  const start = useMemo(() => periodStart(anchor, period), [anchor, period]);
-  const periodLabel = PERIODS.find((p) => p.key === period)!.label;
+  const start = useMemo(
+    () => (period === 'custom' ? monthStartOf(customFrom) : periodStart(anchor, period)),
+    [anchor, period, customFrom]
+  );
+  // Only meaningful for 'custom' — preset periods run open-ended up to
+  // today, same as before this feature existed.
+  const end = period === 'custom' ? monthEnd(customTo) : null;
 
+  const periodLabel = useMemo(() => {
+    if (period !== 'custom') return PERIODS.find((p) => p.key === period)!.label;
+    return customFrom === customTo ? monthLabel(customFrom) : `${monthLabel(customFrom)} – ${monthLabel(customTo)}`;
+  }, [period, customFrom, customTo]);
+
+  // For preset periods, the existing rolling monthly_revenue_expense view
+  // (always the trailing 12 months) is reused as before. A custom range
+  // can reach further back than that view covers, or span differently, so
+  // it's built fresh here directly from quotation_payments (cash-basis
+  // revenue, same rule as the view) and the full expense set (general +
+  // vendor purchases together, matching what the view itself sums).
   const chartData = useMemo(() => {
-    const n = PERIODS.find((p) => p.key === period)!.chartSlice;
-    return monthlyFigures.slice(-n);
-  }, [monthlyFigures, period]);
+    if (period !== 'custom') {
+      const n = PERIODS.find((p) => p.key === period)!.chartSlice;
+      return monthlyFigures.slice(-n);
+    }
+
+    const months = monthsBetween(customFrom, customTo);
+    return months.map((monthValue) => {
+      const mStart = monthStartOf(monthValue);
+      const mEnd = monthEnd(monthValue);
+      const revenue = quotationPayments
+        .filter((p) => p.paymentDate >= mStart && p.paymentDate <= mEnd)
+        .reduce((sum, p) => sum + p.amount, 0);
+      const generalExpenses = expenses
+        .filter((e) => e.date >= mStart && e.date <= mEnd)
+        .reduce((sum, e) => sum + e.amount, 0);
+      const vendorExpenses = vendorPurchases
+        .filter((v) => v.date >= mStart && v.date <= mEnd)
+        .reduce((sum, v) => sum + v.amount, 0);
+      return { month: monthLabel(monthValue), revenue, expenses: generalExpenses + vendorExpenses };
+    });
+  }, [period, monthlyFigures, customFrom, customTo, quotationPayments, expenses, vendorPurchases]);
 
   const totals = useMemo(() => {
     const revenue = chartData.reduce((sum, m) => sum + m.revenue, 0);
@@ -50,8 +137,14 @@ export default function Reports() {
     return { revenue, expenses: exp, profit: revenue - exp };
   }, [chartData]);
 
-  const periodExpenses = useMemo(() => expenses.filter((e) => e.date >= start), [expenses, start]);
-  const periodQuotations = useMemo(() => quotations.filter((q) => q.date >= start), [quotations, start]);
+  const periodExpenses = useMemo(
+    () => expenses.filter((e) => e.date >= start && (!end || e.date <= end)),
+    [expenses, start, end]
+  );
+  const periodQuotations = useMemo(
+    () => quotations.filter((q) => q.date >= start && (!end || q.date <= end)),
+    [quotations, start, end]
+  );
 
   // Quotations are the live source of "business generated this period" now
   // — a quotation exists (and is worth counting) the moment it's created,
@@ -152,7 +245,7 @@ export default function Reports() {
     <>
       <Topbar title="Reports" subtitle="Your complete statistics hub — filter by period to drill in" />
       <div className="view-body">
-        <div className="chip-row">
+        <div className="chip-row" style={{ marginBottom: period === 'custom' ? 8 : 16 }}>
           {PERIODS.map((p) => (
             <button
               key={p.key}
@@ -162,7 +255,47 @@ export default function Reports() {
               {p.label}
             </button>
           ))}
+          <button
+            className={`chip${period === 'custom' ? ' is-active' : ''}`}
+            onClick={() => setPeriod('custom')}
+          >
+            Custom
+          </button>
         </div>
+
+        {period === 'custom' && (
+          <div className="form-row" style={{ marginBottom: 16 }}>
+            <div className="form-field">
+              <label>From</label>
+              <input
+                type="month"
+                value={customFrom}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setCustomFrom(next);
+                  // Keep the range valid without a separate error state —
+                  // picking a From after the current To just pulls To up
+                  // to match it (a one-month-wide range), same idea as the
+                  // native <input type="date"> min/max clamping browsers
+                  // already do elsewhere.
+                  if (next > customTo) setCustomTo(next);
+                }}
+              />
+            </div>
+            <div className="form-field">
+              <label>To</label>
+              <input
+                type="month"
+                value={customTo}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setCustomTo(next);
+                  if (next < customFrom) setCustomFrom(next);
+                }}
+              />
+            </div>
+          </div>
+        )}
 
         <div className="stat-grid">
           <div className="facet-card">
