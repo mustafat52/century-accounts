@@ -3,6 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import Topbar from '../components/Topbar';
 import { useApp } from '../context/AppContext';
 import { formatINR } from '../utils/format';
+import { exportReportsSnapshot } from '../utils/exportLedger';
 import type { InvoiceSlab } from '../types';
 import { SLAB_DISCOUNT_PERCENT } from '../types';
 
@@ -240,26 +241,52 @@ export default function Reports() {
 
   const totalReceivable = customers.reduce((sum, c) => sum + c.outstanding, 0);
   const totalPayable = vendors.reduce((sum, v) => sum + v.payable, 0);
+  const receivables = customers.filter((c) => c.outstanding > 0).map((c) => ({ name: c.name, amount: c.outstanding }));
+  const payables = vendors.filter((v) => v.payable > 0).map((v) => ({ name: v.name, amount: v.payable }));
+
+  const handleExport = () => {
+    exportReportsSnapshot({
+      periodLabel,
+      totals,
+      chartData,
+      quotationStatusBreakdown,
+      topCustomers,
+      expenseByCategory,
+      topVendors,
+      slabBreakdown,
+      gstSplit,
+      quotationSummary,
+      receivables,
+      totalReceivable,
+      payables,
+      totalPayable,
+    });
+  };
 
   return (
     <>
       <Topbar title="Reports" subtitle="Your complete statistics hub — filter by period to drill in" />
       <div className="view-body">
-        <div className="chip-row" style={{ marginBottom: period === 'custom' ? 8 : 16 }}>
-          {PERIODS.map((p) => (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+          <div className="chip-row" style={{ marginBottom: period === 'custom' ? 8 : 16 }}>
+            {PERIODS.map((p) => (
+              <button
+                key={p.key}
+                className={`chip${period === p.key ? ' is-active' : ''}`}
+                onClick={() => setPeriod(p.key)}
+              >
+                {p.label}
+              </button>
+            ))}
             <button
-              key={p.key}
-              className={`chip${period === p.key ? ' is-active' : ''}`}
-              onClick={() => setPeriod(p.key)}
+              className={`chip${period === 'custom' ? ' is-active' : ''}`}
+              onClick={() => setPeriod('custom')}
             >
-              {p.label}
+              Custom
             </button>
-          ))}
-          <button
-            className={`chip${period === 'custom' ? ' is-active' : ''}`}
-            onClick={() => setPeriod('custom')}
-          >
-            Custom
+          </div>
+          <button className="btn btn-primary btn-small" onClick={handleExport}>
+            Export Report (Excel)
           </button>
         </div>
 
