@@ -8,6 +8,8 @@ export interface CuttingJobItemInput {
   lengthIn: number;
   widthIn: number;
   quantity: number;
+  /** Optional — whose piece this is, shown on the cutting diagram and persisted with the job. */
+  customerName?: string;
 }
 
 interface InventoryContextValue {
@@ -169,6 +171,7 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
       length_in: item.lengthIn,
       width_in: item.widthIn,
       quantity: item.quantity,
+      customer_name: item.customerName?.trim() || null,
       sort_order: idx,
     }));
     const { data: insertedJobItems, error: jobItemsErr } = await supabase

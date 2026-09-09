@@ -52,6 +52,8 @@ export interface CuttingJobItem {
   widthIn: number;
   quantity: number;
   sortOrder: number;
+  /** Optional — who this piece is for. Shown on the cutting diagram and kept with the job's history once confirmed. */
+  customerName: string | null;
 }
 
 export interface PlanSheetItem {

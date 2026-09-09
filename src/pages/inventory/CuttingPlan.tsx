@@ -1,24 +1,33 @@
 import { useMemo, useState } from 'react';
 import { useInventory, type CuttingJobItemInput } from '../../context/InventoryContext';
 import { parseFractionInches, formatFractionInches } from '../../lib/fractionInches';
-import type { PlanResult, SheetUsage } from '../../lib/cuttingAlgorithm';
+import type { PlacedPiece, PlanResult, SheetUsage } from '../../lib/cuttingAlgorithm';
 
 interface DraftRow {
   key: string;
+  customerName: string;
   lengthRaw: string;
   widthRaw: string;
   quantityRaw: string;
 }
 
 function newRow(): DraftRow {
-  return { key: crypto.randomUUID(), lengthRaw: '', widthRaw: '', quantityRaw: '1' };
+  return { key: crypto.randomUUID(), customerName: '', lengthRaw: '', widthRaw: '', quantityRaw: '1' };
 }
 
-// Sheet dimension -> the leftover rectangle's position on the sheet. The
-// algorithm only returns the leftover's size, but since a right-strip
-// leftover always spans the sheet's full length and a top-strip leftover
-// always spans its full width, which one it was — and therefore where it
-// sits — is recoverable from that alone.
+// A piece's id is "rowIndex:instanceIndex" (see generatePlan in
+// InventoryContext) — this recovers which draft row, and therefore which
+// customer name, a placed piece came from.
+function customerNameForPiece(pieceId: string, rows: DraftRow[]): string {
+  const rowIndex = Number(pieceId.split(':')[0]);
+  return rows[rowIndex]?.customerName?.trim() || '';
+}
+
+// Sheet dimension -> the leftover rectangle's position. The algorithm only
+// returns the leftover's size; since a right-strip leftover always spans
+// the sheet's full length and a top-strip leftover always spans its full
+// width, which one it was — and therefore where it sits — is recoverable
+// from that alone.
 function leftoverRect(sheet: SheetUsage): { x: number; y: number; w: number; h: number } | null {
   if (sheet.leftoverLengthIn == null || sheet.leftoverWidthIn == null) return null;
   const isRightStrip = sheet.leftoverLengthIn === sheet.sheetLengthIn;
@@ -28,54 +37,144 @@ function leftoverRect(sheet: SheetUsage): { x: number; y: number; w: number; h: 
   return { x: 0, y: sheet.sheetLengthIn - sheet.leftoverLengthIn, w: sheet.sheetWidthIn, h: sheet.leftoverLengthIn };
 }
 
-function SheetDiagram({ sheet }: { sheet: SheetUsage }) {
+// Per spec, only the SINGLE largest leftover rectangle is tracked into
+// Stock/Waste — when a piece leaves room on two sides (e.g. to its right
+// AND below it), the smaller of those two goes untracked by design, not
+// by bug. This computes how much area that untracked remainder is, so the
+// diagram can say so explicitly instead of just showing an unlabeled gap
+// that reads as broken.
+function untrackedScrapArea(sheet: SheetUsage): number {
+  const totalArea = sheet.sheetWidthIn * sheet.sheetLengthIn;
+  const usedArea = sheet.placedPieces.reduce((sum, p) => sum + p.widthIn * p.lengthIn, 0);
+  const trackedLeftoverArea = (sheet.leftoverWidthIn ?? 0) * (sheet.leftoverLengthIn ?? 0);
+  return Math.max(0, totalArea - usedArea - trackedLeftoverArea);
+}
+
+// Two sheets are "the same layout" for grouping purposes only if every
+// placed piece matches in size, position, rotation, AND customer name —
+// same geometry with a different customer's name on it is NOT the same
+// layout to a shop that's handing back labeled pieces.
+function sheetSignature(sheet: SheetUsage, rows: DraftRow[]): string {
+  const pieces = [...sheet.placedPieces]
+    .sort((a, b) => a.xIn - b.xIn || a.yIn - b.yIn)
+    .map((p) => `${p.widthIn}x${p.lengthIn}@${p.xIn},${p.yIn}${p.rotated ? 'R' : ''}:${customerNameForPiece(p.pieceId, rows)}`)
+    .join('|');
+  return `${sheet.sheetWidthIn}x${sheet.sheetLengthIn}:${sheet.origin}::${pieces}::${sheet.leftoverWidthIn ?? 0}x${sheet.leftoverLengthIn ?? 0}:${sheet.leftoverClassification ?? ''}`;
+}
+
+interface SheetGroup {
+  representative: SheetUsage;
+  count: number;
+}
+
+function groupSheets(sheets: SheetUsage[], rows: DraftRow[]): SheetGroup[] {
+  const order: string[] = [];
+  const groups = new Map<string, SheetGroup>();
+  for (const sheet of sheets) {
+    const sig = sheetSignature(sheet, rows);
+    const existing = groups.get(sig);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      groups.set(sig, { representative: sheet, count: 1 });
+      order.push(sig);
+    }
+  }
+  return order.map((sig) => groups.get(sig)!);
+}
+
+function SheetDiagram({ sheet, rows }: { sheet: SheetUsage; rows: DraftRow[] }) {
   const leftover = leftoverRect(sheet);
-  const labelSize = Math.max(sheet.sheetWidthIn, sheet.sheetLengthIn) * 0.028;
+  const labelSize = Math.max(sheet.sheetWidthIn, sheet.sheetLengthIn) * 0.032;
+  const scrapArea = untrackedScrapArea(sheet);
+  const scrapNote = scrapArea > 1 ? `+ ~${Math.round(scrapArea)} sq in of trim around the piece(s), too irregular to log as its own stock line` : null;
 
   return (
-    <svg
-      viewBox={`0 0 ${sheet.sheetWidthIn} ${sheet.sheetLengthIn}`}
-      style={{ width: '100%', height: 'auto', maxHeight: 280, background: 'var(--surface-2)', borderRadius: 4 }}
-    >
-      <rect x={0} y={0} width={sheet.sheetWidthIn} height={sheet.sheetLengthIn} fill="none" stroke="var(--border)" strokeWidth={0.5} />
-
-      {leftover && (
+    <div>
+      <svg
+        viewBox={`0 0 ${sheet.sheetWidthIn} ${sheet.sheetLengthIn}`}
+        style={{ width: '100%', height: 'auto', maxHeight: 320, background: 'var(--surface-2)', borderRadius: 4 }}
+      >
+        {/* Base sheet fill — this used to be `fill="none"`, which let the
+            container's own background show through and made any untracked
+            area look like an unexplained void rather than "still sheet
+            material, just not logged as its own line." */}
         <rect
-          x={leftover.x}
-          y={leftover.y}
-          width={leftover.w}
-          height={leftover.h}
-          fill={sheet.leftoverClassification === 'waste' ? 'var(--danger-dim)' : 'var(--success-dim)'}
-          stroke={sheet.leftoverClassification === 'waste' ? 'var(--danger)' : 'var(--success)'}
-          strokeDasharray="2,1.5"
-          strokeWidth={0.4}
+          x={0}
+          y={0}
+          width={sheet.sheetWidthIn}
+          height={sheet.sheetLengthIn}
+          fill="rgba(236, 231, 219, 0.07)"
+          stroke="var(--border)"
+          strokeWidth={0.5}
         />
-      )}
 
-      {sheet.placedPieces.map((p, i) => (
-        <g key={i}>
+        {leftover && (
           <rect
-            x={p.xIn}
-            y={p.yIn}
-            width={p.widthIn}
-            height={p.lengthIn}
-            fill="var(--gold-dim)"
-            stroke="var(--gold)"
-            strokeWidth={0.5}
+            x={leftover.x}
+            y={leftover.y}
+            width={leftover.w}
+            height={leftover.h}
+            fill={sheet.leftoverClassification === 'waste' ? 'var(--danger-dim)' : 'var(--success-dim)'}
+            stroke={sheet.leftoverClassification === 'waste' ? 'var(--danger)' : 'var(--success)'}
+            strokeDasharray="2,1.5"
+            strokeWidth={0.4}
           />
-          <text
-            x={p.xIn + p.widthIn / 2}
-            y={p.yIn + p.lengthIn / 2}
-            fontSize={labelSize}
-            fill="var(--gold-bright)"
-            textAnchor="middle"
-            dominantBaseline="middle"
-          >
-            {Math.round(p.widthIn)}×{Math.round(p.lengthIn)}
-          </text>
-        </g>
-      ))}
-    </svg>
+        )}
+
+        {sheet.placedPieces.map((p: PlacedPiece, i) => {
+          const name = customerNameForPiece(p.pieceId, rows);
+          return (
+            <g key={i}>
+              <rect x={p.xIn} y={p.yIn} width={p.widthIn} height={p.lengthIn} fill="var(--gold-dim)" stroke="var(--gold)" strokeWidth={0.5} />
+              <title>
+                {name ? `${name} — ` : ''}
+                {Math.round(p.widthIn)}" × {Math.round(p.lengthIn)}"
+              </title>
+              {name ? (
+                <>
+                  <text
+                    x={p.xIn + p.widthIn / 2}
+                    y={p.yIn + p.lengthIn / 2 - labelSize * 0.6}
+                    fontSize={labelSize}
+                    fontWeight={600}
+                    fill="var(--gold-bright)"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                  >
+                    {name}
+                  </text>
+                  <text
+                    x={p.xIn + p.widthIn / 2}
+                    y={p.yIn + p.lengthIn / 2 + labelSize * 0.9}
+                    fontSize={labelSize * 0.85}
+                    fill="var(--gold)"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                  >
+                    {Math.round(p.widthIn)}×{Math.round(p.lengthIn)}
+                  </text>
+                </>
+              ) : (
+                <text
+                  x={p.xIn + p.widthIn / 2}
+                  y={p.yIn + p.lengthIn / 2}
+                  fontSize={labelSize}
+                  fill="var(--gold-bright)"
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                >
+                  {Math.round(p.widthIn)}×{Math.round(p.lengthIn)}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      {scrapNote && (
+        <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-muted)', fontStyle: 'italic' }}>{scrapNote}</div>
+      )}
+    </div>
   );
 }
 
@@ -86,14 +185,19 @@ export default function CuttingPlan() {
   const [rows, setRows] = useState<DraftRow[]>([newRow()]);
   const [error, setError] = useState('');
   const [plan, setPlan] = useState<PlanResult | null>(null);
+  const [planRows, setPlanRows] = useState<DraftRow[]>([]); // rows as they were AT generation time, so labels stay correct even if the form is edited afterward
   const [confirmedItems, setConfirmedItems] = useState<CuttingJobItemInput[] | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [confirmedMessage, setConfirmedMessage] = useState('');
+  const [activeGroupIndex, setActiveGroupIndex] = useState(0);
 
   const totalPieces = useMemo(
     () => rows.reduce((sum, r) => sum + (parseInt(r.quantityRaw, 10) || 0), 0),
     [rows]
   );
+
+  const groups = useMemo(() => (plan ? groupSheets(plan.sheets, planRows) : []), [plan, planRows]);
+  const activeGroup = groups[activeGroupIndex] ?? null;
 
   function updateRow(key: string, patch: Partial<DraftRow>) {
     setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -119,13 +223,15 @@ export default function CuttingPlan() {
       const quantity = parseInt(row.quantityRaw, 10);
       if (length === null || width === null) return setError('Every row needs a valid length and width.');
       if (!Number.isFinite(quantity) || quantity <= 0) return setError('Every row needs a quantity of at least 1.');
-      items.push({ lengthIn: length, widthIn: width, quantity });
+      items.push({ lengthIn: length, widthIn: width, quantity, customerName: row.customerName.trim() || undefined });
     }
     if (items.length === 0) return setError('Add at least one piece to cut.');
 
     const result = generatePlan(categoryId, items);
     setPlan(result);
+    setPlanRows(rows);
     setConfirmedItems(items);
+    setActiveGroupIndex(0);
   }
 
   async function handleConfirmCut() {
@@ -141,6 +247,7 @@ export default function CuttingPlan() {
       `Cut confirmed: ${plan.sheets.length} sheet${plan.sheets.length === 1 ? '' : 's'} used, stock updated.`
     );
     setPlan(null);
+    setPlanRows([]);
     setConfirmedItems(null);
     setRows([newRow()]);
   }
@@ -184,12 +291,21 @@ export default function CuttingPlan() {
                 key={row.key}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'minmax(90px, 1fr) minmax(90px, 1fr) minmax(70px, 0.7fr) auto',
+                  gridTemplateColumns: 'minmax(110px, 1.3fr) minmax(90px, 1fr) minmax(90px, 1fr) minmax(70px, 0.7fr) auto',
                   gap: 12,
                   alignItems: 'end',
                   marginBottom: 12,
                 }}
               >
+                <div className="form-field">
+                  <label>{idx === 0 ? 'Customer (optional)' : ' '}</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Kapoor Residence"
+                    value={row.customerName}
+                    onChange={(e) => updateRow(row.key, { customerName: e.target.value })}
+                  />
+                </div>
                 <div className="form-field">
                   <label>{idx === 0 ? 'Length' : ' '}</label>
                   <input
@@ -226,7 +342,7 @@ export default function CuttingPlan() {
               </div>
             ))}
 
-            <div className="flex-row" style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+            <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
               <button type="button" className="btn btn-ghost btn-small" onClick={addRow}>
                 + Add row
               </button>
@@ -264,45 +380,103 @@ export default function CuttingPlan() {
               </div>
             )}
 
-            {plan.sheets.length > 0 && (
-              <>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
-                  {plan.sheets.map((sheet, i) => (
-                    <div className="panel" key={i} style={{ margin: 0 }}>
-                      <div className="panel-head">
-                        <h3>
-                          Sheet {i + 1} · <span className="num">{formatFractionInches(sheet.sheetWidthIn)} × {formatFractionInches(sheet.sheetLengthIn)}</span>
-                        </h3>
-                        <span className={`badge ${sheet.origin}`}>{sheet.origin}</span>
-                      </div>
-                      <div style={{ padding: '16px 20px' }}>
-                        <SheetDiagram sheet={sheet} />
-                        <div style={{ marginTop: 12, fontSize: 12.5, color: 'var(--text-muted)' }}>
-                          {sheet.placedPieces.length} piece{sheet.placedPieces.length === 1 ? '' : 's'} placed ·{' '}
-                          {(sheet.usedAreaFraction * 100).toFixed(0)}% of sheet used
-                        </div>
-                        {sheet.leftoverClassification && (
-                          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span className={`badge ${sheet.leftoverClassification}`}>{sheet.leftoverClassification}</span>
-                            <span className="num" style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-                              leftover {formatFractionInches(sheet.leftoverWidthIn!)} × {formatFractionInches(sheet.leftoverLengthIn!)}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+            {groups.length > 0 && (
+              <div className="panel" style={{ marginBottom: 0 }}>
+                <div className="panel-head">
+                  <h3>
+                    Cutting layouts · {plan.sheets.length} sheet{plan.sheets.length === 1 ? '' : 's'} total across{' '}
+                    {groups.length} distinct layout{groups.length === 1 ? '' : 's'}
+                  </h3>
+                </div>
+
+                {/* Excel-style sheet tabs — sheets with an identical cut
+                    pattern (same pieces, same positions, same customer
+                    labels) collapse into one tab with a ×N count instead
+                    of repeating an identical card N times. */}
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: 2,
+                    padding: '10px 20px 0',
+                    borderBottom: '1px solid var(--border)',
+                    overflowX: 'auto',
+                  }}
+                >
+                  {groups.map((g, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setActiveGroupIndex(i)}
+                      style={{
+                        flex: '0 0 auto',
+                        padding: '8px 16px',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: i === activeGroupIndex ? 'var(--gold-bright)' : 'var(--text-muted)',
+                        background: i === activeGroupIndex ? 'var(--surface-2)' : 'transparent',
+                        border: 'none',
+                        borderBottom: i === activeGroupIndex ? '2px solid var(--gold)' : '2px solid transparent',
+                        cursor: 'pointer',
+                        borderRadius: '4px 4px 0 0',
+                      }}
+                    >
+                      Layout {i + 1}
+                      {g.count > 1 && (
+                        <span style={{ marginLeft: 6, color: 'var(--gold)', fontFamily: 'var(--font-mono)' }}>×{g.count}</span>
+                      )}
+                    </button>
                   ))}
                 </div>
 
-                <div style={{ marginTop: 20 }}>
+                {activeGroup && (
+                  <div style={{ padding: '20px' }}>
+                    <div className="gap-between" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <h3>
+                        <span className="num">
+                          {formatFractionInches(activeGroup.representative.sheetWidthIn)} × {formatFractionInches(activeGroup.representative.sheetLengthIn)}
+                        </span>
+                        {activeGroup.count > 1 && (
+                          <span style={{ marginLeft: 10, fontSize: 12.5, color: 'var(--text-muted)', fontWeight: 400 }}>
+                            — this exact layout is used on {activeGroup.count} sheets
+                          </span>
+                        )}
+                      </h3>
+                      <span className={`badge ${activeGroup.representative.origin}`}>{activeGroup.representative.origin}</span>
+                    </div>
+
+                    <div style={{ maxWidth: 480 }}>
+                      <SheetDiagram sheet={activeGroup.representative} rows={planRows} />
+                    </div>
+
+                    <div style={{ marginTop: 12, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                      {activeGroup.representative.placedPieces.length} piece
+                      {activeGroup.representative.placedPieces.length === 1 ? '' : 's'} placed ·{' '}
+                      {(activeGroup.representative.usedAreaFraction * 100).toFixed(0)}% of sheet used
+                    </div>
+                    {activeGroup.representative.leftoverClassification && (
+                      <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span className={`badge ${activeGroup.representative.leftoverClassification}`}>
+                          {activeGroup.representative.leftoverClassification}
+                        </span>
+                        <span className="num" style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                          leftover {formatFractionInches(activeGroup.representative.leftoverWidthIn!)} ×{' '}
+                          {formatFractionInches(activeGroup.representative.leftoverLengthIn!)}
+                          {activeGroup.count > 1 ? ` (×${activeGroup.count})` : ''}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div style={{ padding: '0 20px 20px' }}>
                   <button type="button" className="btn btn-primary" onClick={handleConfirmCut} disabled={confirming}>
-                    {confirming ? 'Confirming…' : 'Confirm & Cut'}
+                    {confirming ? 'Confirming…' : `Confirm & Cut — ${plan.sheets.length} sheet${plan.sheets.length === 1 ? '' : 's'}`}
                   </button>
                   <span style={{ marginLeft: 12, fontSize: 12.5, color: 'var(--text-muted)' }}>
                     Deducts stock and logs the leftovers above. This can't be undone from here.
                   </span>
                 </div>
-              </>
+              </div>
             )}
           </>
         )}
