@@ -242,6 +242,146 @@ export function exportAllWorkersLedger(workers: Worker[], advances: WorkerAdvanc
 // complete picture, not just one slice of it.
 // ============================================================
 
+// ============================================================
+// Reports snapshot — exports exactly what's on screen for whichever
+// period is currently selected (preset or a custom From/To range), one
+// focused sheet per panel so it reads the same way the page itself is
+// laid out, rather than one dense, hard-to-scan table.
+// ============================================================
+
+interface ReportsSnapshotInput {
+  periodLabel: string;
+  totals: { revenue: number; expenses: number; profit: number };
+  chartData: { month: string; revenue: number; expenses: number }[];
+  quotationStatusBreakdown: Record<string, { count: number; amount: number }>;
+  topCustomers: { name: string; amount: number }[];
+  expenseByCategory: [string, number][];
+  topVendors: { name: string; amount: number }[];
+  slabBreakdown: { slab: string; percentLabel: string; invoiceCount: number; customerCount: number; amount: number }[];
+  gstSplit: { withGst: { count: number; amount: number }; withoutGst: { count: number; amount: number } };
+  quotationSummary: { pendingCount: number; pendingAmount: number; convertedCount: number; convertedAmount: number };
+  receivables: { name: string; amount: number }[];
+  totalReceivable: number;
+  payables: { name: string; amount: number }[];
+  totalPayable: number;
+}
+
+const STATUS_SHEET_LABELS: Record<string, string> = {
+  due: 'Due',
+  overdue: 'Overdue',
+  paid: 'Paid',
+  converted: 'Invoiced',
+};
+
+export function exportReportsSnapshot(input: ReportsSnapshotInput) {
+  const wb = XLSX.utils.book_new();
+
+  const summaryAoa: (string | number)[][] = [
+    ['Century Glass Art — Report Snapshot'],
+    ['Period', input.periodLabel],
+    [],
+    ['Revenue', input.totals.revenue],
+    ['Expenses', input.totals.expenses],
+    ['Net Profit', input.totals.profit],
+    [],
+    ['Pending Quotations', input.quotationSummary.pendingCount, input.quotationSummary.pendingAmount],
+    ['Converted to Invoice', input.quotationSummary.convertedCount, input.quotationSummary.convertedAmount],
+    [],
+    ['Total Receivable (all time, as of today)', input.totalReceivable],
+    ['Total Payable (all time, as of today)', input.totalPayable],
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryAoa), 'Summary');
+
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(
+      input.chartData.map((m) => ({ Month: m.month, Revenue: m.revenue, Expenses: m.expenses, Net: m.revenue - m.expenses }))
+    ),
+    'Monthly Trend'
+  );
+
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(
+      Object.entries(input.quotationStatusBreakdown).map(([status, v]) => ({
+        Status: STATUS_SHEET_LABELS[status] ?? status,
+        Count: v.count,
+        Amount: v.amount,
+      }))
+    ),
+    'Quotation Status'
+  );
+
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(input.topCustomers.map((c) => ({ Customer: c.name, Amount: c.amount }))),
+    'Top Customers'
+  );
+
+  const totalExpenseForPercent = input.expenseByCategory.reduce((sum, [, amount]) => sum + amount, 0);
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(
+      input.expenseByCategory.map(([category, amount]) => ({
+        Category: category,
+        Amount: amount,
+        '% of Total': totalExpenseForPercent > 0 ? Math.round((amount / totalExpenseForPercent) * 1000) / 10 : 0,
+      }))
+    ),
+    'Expenses by Category'
+  );
+
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(input.topVendors.map((v) => ({ Vendor: v.name, Amount: v.amount }))),
+    'Top Vendors'
+  );
+
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(
+      input.slabBreakdown.map((s) => ({
+        Slab: s.slab,
+        Discount: s.percentLabel,
+        Quotations: s.invoiceCount,
+        Customers: s.customerCount,
+        Business: s.amount,
+      }))
+    ),
+    'Slab Breakdown'
+  );
+
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet([
+      { Type: 'With GST', Count: input.gstSplit.withGst.count, Amount: input.gstSplit.withGst.amount },
+      { Type: 'Without GST', Count: input.gstSplit.withoutGst.count, Amount: input.gstSplit.withoutGst.amount },
+    ]),
+    'GST Split'
+  );
+
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet([
+      ...input.receivables.map((r) => ({ Customer: r.name, Outstanding: r.amount })),
+      { Customer: 'TOTAL', Outstanding: input.totalReceivable },
+    ]),
+    'Receivables'
+  );
+
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet([
+      ...input.payables.map((p) => ({ Vendor: p.name, Payable: p.amount })),
+      { Vendor: 'TOTAL', Payable: input.totalPayable },
+    ]),
+    'Payables'
+  );
+
+  const safePeriod = input.periodLabel.replace(/[^a-zA-Z0-9]+/g, '_');
+  XLSX.writeFile(wb, `Century_Glass_Art_Report_${safePeriod}.xlsx`);
+}
+
 export function exportAllExpenses(expenses: Expense[], vendorPurchases: VendorPurchase[], vendors: Vendor[]) {
   const vendorName = (id: string) => vendors.find((v) => v.id === id)?.name ?? 'Unknown vendor';
 

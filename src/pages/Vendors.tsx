@@ -206,7 +206,8 @@ export default function Vendors() {
                         <span className="badge due">Pending Pricing</span>
                       )}
                     </td>
-                    <td style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <td>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       {row.pendingSlip && (
                         <>
                           <button
@@ -223,6 +224,7 @@ export default function Vendors() {
                           </button>
                         </>
                       )}
+                      </div>
                     </td>
                   </tr>
                 ))}

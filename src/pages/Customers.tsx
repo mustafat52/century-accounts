@@ -149,7 +149,8 @@ function CustomerDetailModal({
                       <td>
                         <StatusBadge status={q.effectiveStatus} showPartial={q.paidAmount > 0 && q.balanceAmount > 0} />
                       </td>
-                      <td style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <td>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <button className="btn btn-ghost btn-small" onClick={() => openPrint('quotation', q.id)}>
                           Print
                         </button>
@@ -161,6 +162,7 @@ function CustomerDetailModal({
                         {(q.effectiveStatus === 'due' || q.effectiveStatus === 'overdue') && (
                           <CopyReminderButton quotation={q} customerName={customer.name} />
                         )}
+                      </div>
                       </td>
                     </tr>
                   );

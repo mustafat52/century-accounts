@@ -170,7 +170,8 @@ export default function Invoicing() {
                       <td>
                         <StatusBadge status={q.effectiveStatus} showPartial={q.paidAmount > 0 && q.balanceAmount > 0} />
                       </td>
-                      <td style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <td>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <button className="btn btn-ghost btn-small" onClick={() => openPrint('quotation', q.id)}>
                           Quotation
                         </button>
@@ -206,6 +207,7 @@ export default function Invoicing() {
                             Delete
                           </button>
                         )}
+                      </div>
                       </td>
                     </tr>
                   ))}
@@ -257,7 +259,8 @@ export default function Invoicing() {
                       {i.transportation > 0 && <div className="row-sub">+ Transport {formatINR(i.transportation)}</div>}
                     </td>
                     <td className="row-sub">{i.date}</td>
-                    <td style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <td>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <button className="btn btn-ghost btn-small" onClick={() => openPrint('invoice', i.id)}>
                         Print
                       </button>
@@ -266,6 +269,7 @@ export default function Invoicing() {
                           Roll back to Quotation
                         </button>
                       )}
+                      </div>
                     </td>
                   </tr>
                 ))}
