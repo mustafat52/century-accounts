@@ -23,30 +23,16 @@ function customerNameForPiece(pieceId: string, rows: DraftRow[]): string {
   return rows[rowIndex]?.customerName?.trim() || '';
 }
 
-// Sheet dimension -> the leftover rectangle's position. The algorithm only
-// returns the leftover's size; since a right-strip leftover always spans
-// the sheet's full length and a top-strip leftover always spans its full
-// width, which one it was — and therefore where it sits — is recoverable
-// from that alone.
-function leftoverRect(sheet: SheetUsage): { x: number; y: number; w: number; h: number } | null {
-  if (sheet.leftoverLengthIn == null || sheet.leftoverWidthIn == null) return null;
-  const isRightStrip = sheet.leftoverLengthIn === sheet.sheetLengthIn;
-  if (isRightStrip) {
-    return { x: sheet.sheetWidthIn - sheet.leftoverWidthIn, y: 0, w: sheet.leftoverWidthIn, h: sheet.leftoverLengthIn };
-  }
-  return { x: 0, y: sheet.sheetLengthIn - sheet.leftoverLengthIn, w: sheet.sheetWidthIn, h: sheet.leftoverLengthIn };
-}
+// Per spec, every distinct pocket of unused space gets tracked now (not
+// just the single largest) — see cuttingAlgorithm.ts's computeLeftoverRegions.
 
-// Per spec, only the SINGLE largest leftover rectangle is tracked into
-// Stock/Waste — when a piece leaves room on two sides (e.g. to its right
-// AND below it), the smaller of those two goes untracked by design, not
-// by bug. This computes how much area that untracked remainder is, so the
-// diagram can say so explicitly instead of just showing an unlabeled gap
-// that reads as broken.
+// Now that computeLeftoverRegions tracks 100% of unused space exactly,
+// this should always be ~0 — kept as a safety-net display in case of a
+// future edge case, rather than deleted outright.
 function untrackedScrapArea(sheet: SheetUsage): number {
   const totalArea = sheet.sheetWidthIn * sheet.sheetLengthIn;
   const usedArea = sheet.placedPieces.reduce((sum, p) => sum + p.widthIn * p.lengthIn, 0);
-  const trackedLeftoverArea = (sheet.leftoverWidthIn ?? 0) * (sheet.leftoverLengthIn ?? 0);
+  const trackedLeftoverArea = sheet.leftoverRegions.reduce((sum, r) => sum + r.widthIn * r.lengthIn, 0);
   return Math.max(0, totalArea - usedArea - trackedLeftoverArea);
 }
 
@@ -59,7 +45,11 @@ function sheetSignature(sheet: SheetUsage, rows: DraftRow[]): string {
     .sort((a, b) => a.xIn - b.xIn || a.yIn - b.yIn)
     .map((p) => `${p.widthIn}x${p.lengthIn}@${p.xIn},${p.yIn}${p.rotated ? 'R' : ''}:${customerNameForPiece(p.pieceId, rows)}`)
     .join('|');
-  return `${sheet.sheetWidthIn}x${sheet.sheetLengthIn}:${sheet.origin}::${pieces}::${sheet.leftoverWidthIn ?? 0}x${sheet.leftoverLengthIn ?? 0}:${sheet.leftoverClassification ?? ''}`;
+  const leftovers = [...sheet.leftoverRegions]
+    .sort((a, b) => a.xIn - b.xIn || a.yIn - b.yIn)
+    .map((r) => `${r.widthIn}x${r.lengthIn}@${r.xIn},${r.yIn}`)
+    .join('|');
+  return `${sheet.sheetWidthIn}x${sheet.sheetLengthIn}:${sheet.origin}::${pieces}::${leftovers}:${sheet.leftoverClassification ?? ''}`;
 }
 
 interface SheetGroup {
@@ -84,10 +74,9 @@ function groupSheets(sheets: SheetUsage[], rows: DraftRow[]): SheetGroup[] {
 }
 
 function SheetDiagram({ sheet, rows }: { sheet: SheetUsage; rows: DraftRow[] }) {
-  const leftover = leftoverRect(sheet);
   const labelSize = Math.max(sheet.sheetWidthIn, sheet.sheetLengthIn) * 0.032;
   const scrapArea = untrackedScrapArea(sheet);
-  const scrapNote = scrapArea > 1 ? `+ ~${Math.round(scrapArea)} sq in of trim around the piece(s), too irregular to log as its own stock line` : null;
+  const scrapNote = scrapArea > 1 ? `+ ~${Math.round(scrapArea)} sq in of trim, too irregular to log as its own stock line` : null;
 
   return (
     <div>
@@ -109,18 +98,19 @@ function SheetDiagram({ sheet, rows }: { sheet: SheetUsage; rows: DraftRow[] }) 
           strokeWidth={0.5}
         />
 
-        {leftover && (
+        {sheet.leftoverRegions.map((r, i) => (
           <rect
-            x={leftover.x}
-            y={leftover.y}
-            width={leftover.w}
-            height={leftover.h}
+            key={i}
+            x={r.xIn}
+            y={r.yIn}
+            width={r.widthIn}
+            height={r.lengthIn}
             fill={sheet.leftoverClassification === 'waste' ? 'var(--danger-dim)' : 'var(--success-dim)'}
             stroke={sheet.leftoverClassification === 'waste' ? 'var(--danger)' : 'var(--success)'}
             strokeDasharray="2,1.5"
             strokeWidth={0.4}
           />
-        )}
+        ))}
 
         {sheet.placedPieces.map((p: PlacedPiece, i) => {
           const name = customerNameForPiece(p.pieceId, rows);
@@ -454,13 +444,15 @@ export default function CuttingPlan() {
                       {(activeGroup.representative.usedAreaFraction * 100).toFixed(0)}% of sheet used
                     </div>
                     {activeGroup.representative.leftoverClassification && (
-                      <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                         <span className={`badge ${activeGroup.representative.leftoverClassification}`}>
                           {activeGroup.representative.leftoverClassification}
                         </span>
                         <span className="num" style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-                          leftover {formatFractionInches(activeGroup.representative.leftoverWidthIn!)} ×{' '}
-                          {formatFractionInches(activeGroup.representative.leftoverLengthIn!)}
+                          leftover{activeGroup.representative.leftoverRegions.length > 1 ? 's' : ''}:{' '}
+                          {activeGroup.representative.leftoverRegions
+                            .map((r) => `${formatFractionInches(r.widthIn)} × ${formatFractionInches(r.lengthIn)}`)
+                            .join(', ')}
                           {activeGroup.count > 1 ? ` (×${activeGroup.count})` : ''}
                         </span>
                       </div>

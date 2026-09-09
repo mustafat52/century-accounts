@@ -44,15 +44,22 @@ export interface PlacedPiece {
 
 export type LeftoverClassification = 'waste' | 'stock';
 
+export interface LeftoverRegion {
+  xIn: number;
+  yIn: number;
+  widthIn: number;
+  lengthIn: number;
+}
+
 export interface SheetUsage {
   sourceStockId: string;
   sheetLengthIn: number;
   sheetWidthIn: number;
   origin: StockOrigin;
   placedPieces: PlacedPiece[];
-  /** Null when the sheet is fully used (no leftover worth logging). */
-  leftoverLengthIn: number | null;
-  leftoverWidthIn: number | null;
+  /** Every distinct pocket of unused space on this sheet, decomposed into non-overlapping guillotine-valid rectangles. Empty array if the sheet is fully used. */
+  leftoverRegions: LeftoverRegion[];
+  /** One classification for the whole sheet (per the >50%-used rule) — applies uniformly to every region in leftoverRegions. Null when leftoverRegions is empty. */
   leftoverClassification: LeftoverClassification | null;
   usedAreaFraction: number;
 }
@@ -183,32 +190,39 @@ function pickStockForPiece(pool: AvailableStock[], piece: Piece): AvailableStock
 }
 
 /**
- * Computes the single largest leftover rectangle on a finished sheet, as
- * two guillotine-valid candidates — a right-side strip (one vertical cut
- * at the widest shelf's used width, spanning the full sheet length) and a
- * top strip (one horizontal cut above the topmost shelf, spanning the
- * full sheet width) — and returns whichever has the larger area. This is
- * a deliberate simplification: shelf packing can leave smaller scattered
- * gaps this doesn't capture, but both candidates are always genuinely
- * free and genuinely guillotine-cuttable, which is what matters for
- * something that gets logged back into stock or waste.
+ * Decomposes ALL unused space on a finished sheet into non-overlapping,
+ * guillotine-valid rectangles — not just the single largest one. For each
+ * shelf, whatever's unused to the right of its pieces becomes its own
+ * rectangle (bounded to that shelf's own height, so it doesn't overlap
+ * neighboring shelves); the space above the topmost shelf becomes one
+ * final full-width rectangle. Every point on the sheet that isn't under a
+ * placed piece falls into exactly one of these — this is an exact
+ * accounting of unused space, not a heuristic pick-one approximation.
+ *
+ * (v1 of this tracked only the single largest leftover rectangle, per an
+ * early reading of the spec's "compute its single largest leftover
+ * rectangle" wording — real usage showed that silently dropped genuine
+ * reusable/wasted area whenever a piece left room on two sides at once,
+ * so this now tracks everything.)
  */
-function computeLeftoverRectangle(sheet: OpenSheet): { lengthIn: number; widthIn: number } | null {
-  const maxUsedWidth = sheet.shelves.reduce((max, s) => Math.max(max, s.usedWidth), 0);
+function computeLeftoverRegions(sheet: OpenSheet): LeftoverRegion[] {
+  const EPSILON = 0.01; // sub-hundredth-inch slivers aren't worth logging
+  const regions: LeftoverRegion[] = [];
+
+  for (const shelf of sheet.shelves) {
+    const widthIn = sheet.widthIn - shelf.usedWidth;
+    if (widthIn > EPSILON) {
+      regions.push({ xIn: shelf.usedWidth, yIn: shelf.y, widthIn, lengthIn: shelf.height });
+    }
+  }
+
   const usedHeight = sheet.shelves.reduce((sum, s) => sum + s.height, 0);
+  const topLengthIn = sheet.lengthIn - usedHeight;
+  if (topLengthIn > EPSILON) {
+    regions.push({ xIn: 0, yIn: usedHeight, widthIn: sheet.widthIn, lengthIn: topLengthIn });
+  }
 
-  const rightStrip = { widthIn: sheet.widthIn - maxUsedWidth, lengthIn: sheet.lengthIn };
-  const topStrip = { widthIn: sheet.widthIn, lengthIn: sheet.lengthIn - usedHeight };
-
-  const rightArea = Math.max(0, rightStrip.widthIn) * Math.max(0, rightStrip.lengthIn);
-  const topArea = Math.max(0, topStrip.widthIn) * Math.max(0, topStrip.lengthIn);
-
-  const EPSILON = 0.01; // sub-hundredth-inch leftovers aren't worth logging
-  if (rightArea <= EPSILON && topArea <= EPSILON) return null;
-
-  return rightArea >= topArea
-    ? { widthIn: Math.max(0, rightStrip.widthIn), lengthIn: Math.max(0, rightStrip.lengthIn) }
-    : { widthIn: Math.max(0, topStrip.widthIn), lengthIn: Math.max(0, topStrip.lengthIn) };
+  return regions;
 }
 
 /**
@@ -264,7 +278,7 @@ export function generateCuttingPlan(pieces: Piece[], availableStock: AvailableSt
     const usedArea = sheet.placed.reduce((sum, p) => sum + p.lengthIn * p.widthIn, 0);
     const totalArea = sheet.lengthIn * sheet.widthIn;
     const usedAreaFraction = totalArea > 0 ? usedArea / totalArea : 0;
-    const leftover = computeLeftoverRectangle(sheet);
+    const leftoverRegions = computeLeftoverRegions(sheet);
 
     return {
       sourceStockId: sheet.stockId,
@@ -272,9 +286,8 @@ export function generateCuttingPlan(pieces: Piece[], availableStock: AvailableSt
       sheetWidthIn: sheet.widthIn,
       origin: sheet.origin,
       placedPieces: sheet.placed,
-      leftoverLengthIn: leftover?.lengthIn ?? null,
-      leftoverWidthIn: leftover?.widthIn ?? null,
-      leftoverClassification: leftover ? (usedAreaFraction > 0.5 ? 'waste' : 'stock') : null,
+      leftoverRegions,
+      leftoverClassification: leftoverRegions.length > 0 ? (usedAreaFraction > 0.5 ? 'waste' : 'stock') : null,
       usedAreaFraction,
     };
   });

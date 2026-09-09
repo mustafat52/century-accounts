@@ -191,6 +191,17 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
       for (let sheetIdx = 0; sheetIdx < plan.sheets.length; sheetIdx++) {
         const sheet = plan.sheets[sheetIdx];
 
+        // inv_plan_sheets.leftover_length_in/width_in are single-value
+        // columns (this sheet can now have MULTIPLE leftover regions) —
+        // they hold the largest region as a quick-glance summary; the
+        // actual per-region records are the inv_waste/inv_stock rows
+        // written below, which are the real source of truth and can
+        // outnumber 1 per sheet.
+        const largestRegion = sheet.leftoverRegions.reduce<typeof sheet.leftoverRegions[number] | null>(
+          (max, r) => (!max || r.widthIn * r.lengthIn > max.widthIn * max.lengthIn ? r : max),
+          null
+        );
+
         const { data: sheetRow, error: sheetErr } = await supabase
           .from('inv_plan_sheets')
           .insert({
@@ -199,8 +210,8 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
             sheet_length_in: sheet.sheetLengthIn,
             sheet_width_in: sheet.sheetWidthIn,
             origin: sheet.origin,
-            leftover_length_in: sheet.leftoverLengthIn,
-            leftover_width_in: sheet.leftoverWidthIn,
+            leftover_length_in: largestRegion?.lengthIn ?? null,
+            leftover_width_in: largestRegion?.widthIn ?? null,
             leftover_classification: sheet.leftoverClassification,
             sort_order: sheetIdx,
           })
@@ -237,24 +248,28 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
           .eq('id', sheet.sourceStockId);
         if (qtyErr) throw new Error('Failed to deduct stock quantity');
 
-        if (sheet.leftoverClassification === 'waste' && sheet.leftoverLengthIn && sheet.leftoverWidthIn) {
-          const { error: wasteErr } = await supabase.from('inv_waste').insert({
-            category_id: categoryId,
-            length_in: sheet.leftoverLengthIn,
-            width_in: sheet.leftoverWidthIn,
-            source_plan_sheet_id: sheetRow.id,
-          });
-          if (wasteErr) throw new Error('Failed to log waste');
-        } else if (sheet.leftoverClassification === 'stock' && sheet.leftoverLengthIn && sheet.leftoverWidthIn) {
-          const { error: remnantErr } = await supabase.from('inv_stock').insert({
-            category_id: categoryId,
-            length_in: sheet.leftoverLengthIn,
-            width_in: sheet.leftoverWidthIn,
-            quantity: 1,
-            origin: 'remnant',
-            source_plan_sheet_id: sheetRow.id,
-          });
-          if (remnantErr) throw new Error('Failed to log remnant stock');
+        if (sheet.leftoverClassification === 'waste') {
+          for (const region of sheet.leftoverRegions) {
+            const { error: wasteErr } = await supabase.from('inv_waste').insert({
+              category_id: categoryId,
+              length_in: region.lengthIn,
+              width_in: region.widthIn,
+              source_plan_sheet_id: sheetRow.id,
+            });
+            if (wasteErr) throw new Error('Failed to log waste');
+          }
+        } else if (sheet.leftoverClassification === 'stock') {
+          for (const region of sheet.leftoverRegions) {
+            const { error: remnantErr } = await supabase.from('inv_stock').insert({
+              category_id: categoryId,
+              length_in: region.lengthIn,
+              width_in: region.widthIn,
+              quantity: 1,
+              origin: 'remnant',
+              source_plan_sheet_id: sheetRow.id,
+            });
+            if (remnantErr) throw new Error('Failed to log remnant stock');
+          }
         }
       }
     } catch (err) {
