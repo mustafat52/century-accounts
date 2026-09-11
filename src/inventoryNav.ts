@@ -10,6 +10,6 @@ export interface InventoryNavItem {
 
 export const INVENTORY_NAV_ITEMS: InventoryNavItem[] = [
   { to: '/inventory/stock', label: 'Categories & Stock' },
-  { to: '/inventory/waste', label: 'Waste & Remnants' },
+  { to: '/inventory/waste', label: 'Waste' },
   { to: '/inventory/cutting', label: 'Cutting Plan' },
 ];

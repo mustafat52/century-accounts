@@ -22,7 +22,22 @@ export interface Piece {
   widthIn: number;
 }
 
-export type StockOrigin = 'fresh' | 'remnant';
+// Origin tag used only within planning, for source-preference ordering —
+// 'fresh' means pulled from inv_stock; 'waste' means pulled from the
+// inv_waste ledger (previously a separate "remnant" concept living in
+// inv_stock, merged into inv_waste per the client's own instruction: the
+// old 50%-used stock/waste split added no value, since the algorithm
+// already checks whatever's sitting in the waste pool before reaching
+// for a fresh sheet — so there's no reason to keep some leftovers in a
+// separate "remnant stock" bucket at all. Everything leftover is waste;
+// waste is simply checked first.
+export type StockOrigin = 'fresh' | 'waste';
+
+// Only one value now — kept as a named type (rather than a bare boolean)
+// so call sites read `leftoverClassification === 'waste'` instead of a
+// less self-explanatory `!= null`, and so a future distinction could be
+// reintroduced without a wider rename if ever needed again.
+export type LeftoverClassification = 'waste';
 
 export interface AvailableStock {
   stockId: string;
@@ -41,8 +56,6 @@ export interface PlacedPiece {
   yIn: number;
   rotated: boolean;
 }
-
-export type LeftoverClassification = 'waste' | 'stock';
 
 export interface LeftoverRegion {
   xIn: number;
@@ -173,17 +186,20 @@ function tryPlaceOnSheet(piece: Piece, sheet: OpenSheet): boolean {
 
 /**
  * Picks which stock to pull when no open sheet has room for a piece.
- * Remnants are checked first (spec: "remnants preferred over fresh
- * stock"); within whichever pool has a fit, the smallest-area candidate
- * that fits is chosen, so sheet selection doesn't burn a large sheet on a
- * small piece when a smaller one would do.
+ * Existing waste offcuts are checked first (client's own instruction:
+ * always check whether a requested size can already be cut from the
+ * waste pool before touching a fresh sheet — there's no reason to keep
+ * some leftovers in a separate reusable-stock bucket when the algorithm
+ * checks waste first anyway); within whichever pool has a fit, the
+ * smallest-area candidate that fits is chosen, so sheet selection doesn't
+ * burn a large sheet on a small piece when a smaller one would do.
  */
 function pickStockForPiece(pool: AvailableStock[], piece: Piece): AvailableStock | null {
   const candidates = pool.filter((s) => s.quantity > 0 && fitsWithinBounds(piece, s));
   if (candidates.length === 0) return null;
 
-  const remnants = candidates.filter((s) => s.origin === 'remnant');
-  const chosenPool = remnants.length > 0 ? remnants : candidates.filter((s) => s.origin === 'fresh');
+  const wastePieces = candidates.filter((s) => s.origin === 'waste');
+  const chosenPool = wastePieces.length > 0 ? wastePieces : candidates.filter((s) => s.origin === 'fresh');
   if (chosenPool.length === 0) return null;
 
   return chosenPool.reduce((smallest, s) => (pieceArea(s) < pieceArea(smallest) ? s : smallest));
@@ -227,11 +243,11 @@ function computeLeftoverRegions(sheet: OpenSheet): LeftoverRegion[] {
 
 /**
  * Runs the full heuristic: sorts pieces largest-first, packs them onto
- * already-open sheets where possible, opens new sheets (remnants
- * preferred) when none fit, and classifies each finished sheet's leftover
- * per the >50%-used-is-waste rule (spec section 2). Pure function — no
- * side effects, no DB access; `availableStock` quantities are only
- * mutated on the local working copy this function makes internally.
+ * already-open sheets where possible, opens new sheets (existing waste
+ * offcuts preferred over fresh stock) when none fit, and logs every
+ * finished sheet's leftover as waste. Pure function — no side effects, no
+ * DB access; `availableStock` quantities are only mutated on the local
+ * working copy this function makes internally.
  */
 export function generateCuttingPlan(pieces: Piece[], availableStock: AvailableStock[]): PlanResult {
   const sorted = [...pieces].sort((a, b) => pieceArea(b) - pieceArea(a));
@@ -287,7 +303,12 @@ export function generateCuttingPlan(pieces: Piece[], availableStock: AvailableSt
       origin: sheet.origin,
       placedPieces: sheet.placed,
       leftoverRegions,
-      leftoverClassification: leftoverRegions.length > 0 ? (usedAreaFraction > 0.5 ? 'waste' : 'stock') : null,
+      // Every leftover region is waste now, full stop — no more
+      // >50%-used threshold deciding stock vs. waste (see StockOrigin's
+      // comment above for why). usedAreaFraction is kept on SheetUsage
+      // since it's still a useful efficiency stat to show, it just no
+      // longer drives this classification.
+      leftoverClassification: leftoverRegions.length > 0 ? 'waste' : null,
       usedAreaFraction,
     };
   });

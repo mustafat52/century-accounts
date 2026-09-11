@@ -15,10 +15,12 @@ export default function WasteLedger() {
     <>
       <div className="topbar">
         <div className="topbar-title">
-          <h1>Waste &amp; Remnants</h1>
+          <h1>Waste</h1>
           <p>
-            Everything the cutting algorithm has classified as waste — leftover pieces where more than 50% of the
-            source sheet was used. Reusable remnants show up on the Categories &amp; Stock page instead.
+            Every leftover from a confirmed cut lives here — nothing is pre-sorted into a separate "reusable stock"
+            bucket. The Cutting Plan page checks this list first, before touching fresh stock, so anything here that
+            fits a future order gets used automatically; the row disappears once it's been cut up. What's left is
+            what's actually still sitting around.
           </p>
         </div>
       </div>

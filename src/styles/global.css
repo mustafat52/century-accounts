@@ -907,3 +907,147 @@ tbody tr:hover { background: var(--surface-2); }
   .no-print { display: none !important; }
   .receipt-overlay { position: static; background: none; padding: 0; overflow: visible; }
 }
+
+/* ---------- Cutting Ticket (Inventory module) ----------
+   Separate from .receipt-overlay/.receipt-page (used for invoices/
+   quotations/slips) rather than reusing them — those are tuned for
+   exactly ONE page via `position: absolute`, which stacks multiple pages
+   on top of each other instead of paginating them. A cutting ticket can
+   span several pages (one per distinct sheet layout), so this uses normal
+   document flow with page-break-after instead. */
+
+.ticket-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 11, 14, 0.78);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow-y: auto;
+  z-index: 70;
+  padding: 40px 20px;
+}
+
+.ticket-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  width: 780px;
+  max-width: 100%;
+  margin-bottom: 12px;
+}
+
+.ticket-pages {
+  width: 780px;
+  max-width: 100%;
+}
+
+.ticket-page {
+  background: #ffffff;
+  color: #1a1a1a;
+  border-radius: 3px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  padding: 28px 34px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  margin-bottom: 20px;
+}
+.ticket-page:last-child {
+  margin-bottom: 0;
+}
+
+.ticket-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-bottom: 12px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid #ddd;
+}
+
+.ticket-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  color: #1a1a1a;
+}
+
+.ticket-meta {
+  text-align: right;
+  font-size: 11px;
+  color: #555;
+  line-height: 1.6;
+}
+
+.ticket-diagram-wrap {
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  margin: 12px 0;
+  padding: 10px;
+}
+
+.ticket-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 11px;
+}
+.ticket-table th {
+  text-align: left;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #888;
+  border-bottom: 1px solid #ddd;
+  padding: 5px 6px;
+}
+.ticket-table td {
+  padding: 6px 6px;
+  border-bottom: 1px solid #eee;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 8mm;
+  }
+  body * {
+    visibility: hidden;
+  }
+  .ticket-page,
+  .ticket-page * {
+    visibility: visible;
+  }
+  .ticket-pages {
+    position: static;
+    width: 100%;
+  }
+  .ticket-page {
+    box-shadow: none;
+    page-break-after: always;
+  }
+  .ticket-page:last-child {
+    page-break-after: auto;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .ticket-overlay {
+    position: static;
+    background: none;
+    padding: 0;
+    overflow: visible;
+  }
+  .ticket-pages {
+    /* visibility:hidden (used to hide everything else on the page) keeps
+       hidden elements' layout space reserved — without this, the entire
+       hidden Cutting Plan page above the ticket (topbar, form, panels)
+       still pushes this down by a full blank page. Pulling the container
+       itself out of flow via absolute positioning escapes that, while the
+       .ticket-page children below stay in NORMAL flow relative to each
+       other, which is what page-break-after needs to actually paginate. */
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+}

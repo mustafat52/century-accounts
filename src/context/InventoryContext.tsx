@@ -139,21 +139,40 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    const availableStock: AvailableStock[] = stockLines
+    // Fresh stock — any pre-existing 'remnant' rows (from before the
+    // waste/stock split was removed) still map into the waste-preferred
+    // tier below, so old data isn't orphaned by this change.
+    const stockPool: AvailableStock[] = stockLines
       .filter((s) => s.categoryId === categoryId)
-      .map((s) => ({ stockId: s.id, lengthIn: s.lengthIn, widthIn: s.widthIn, origin: s.origin, quantity: s.quantity }));
+      .map((s) => ({
+        stockId: s.id,
+        lengthIn: s.lengthIn,
+        widthIn: s.widthIn,
+        origin: s.origin === 'remnant' ? 'waste' : 'fresh',
+        quantity: s.quantity,
+      }));
 
-    return generateCuttingPlan(pieces, availableStock);
+    // Existing waste offcuts — checked first by the algorithm (see
+    // pickStockForPiece), per the client's own instruction: always see
+    // whether a requested size can already be cut from what's sitting in
+    // the waste pool before reaching for a fresh sheet.
+    const wastePool: AvailableStock[] = wasteLines
+      .filter((w) => w.categoryId === categoryId)
+      .map((w) => ({ stockId: w.id, lengthIn: w.lengthIn, widthIn: w.widthIn, origin: 'waste', quantity: 1 }));
+
+    return generateCuttingPlan(pieces, [...stockPool, ...wastePool]);
   };
 
   // Commits a previously-generated plan: creates the job + job items,
   // then for each sheet used — a plan_sheet row, its placed-piece rows,
-  // the stock quantity deduction, and the resulting waste/remnant row.
-  // Deliberately sequential client-side inserts with manual
-  // rollback-on-failure, NOT a single RPC — this project's AppContext.tsx
-  // documents that RPCs taking a jsonb body silently fail in this
-  // environment ("No API key found in request"), and this operation's
-  // payload (a full plan with nested sheets/items) is exactly that shape.
+  // consuming whichever material it was sourced from (deduct fresh stock,
+  // or delete the waste offcut it came from), and logging every leftover
+  // region as waste. Deliberately sequential client-side inserts with
+  // manual rollback-on-failure, NOT a single RPC — this project's
+  // AppContext.tsx documents that RPCs taking a jsonb body silently fail
+  // in this environment ("No API key found in request"), and this
+  // operation's payload (a full plan with nested sheets/items) is exactly
+  // that shape.
   const confirmCut = async (
     categoryId: string,
     items: CuttingJobItemInput[],
@@ -235,52 +254,64 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
         const { error: itemsErr } = await supabase.from('inv_plan_sheet_items').insert(itemRows);
         if (itemsErr) throw new Error('Failed to create plan sheet items');
 
-        // Deduct one sheet from the stock line it was pulled from. Reads
-        // the quantity from local state rather than a fresh SELECT — fine
-        // for this internal single-shop tool, but a real race (two
-        // confirms in flight at once) could under-count. Flagged rather
-        // than silently assumed safe.
-        const sourceLine = stockLines.find((s) => s.id === sheet.sourceStockId);
-        const currentQty = sourceLine?.quantity ?? 0;
-        const { error: qtyErr } = await supabase
-          .from('inv_stock')
-          .update({ quantity: Math.max(0, currentQty - 1) })
-          .eq('id', sheet.sourceStockId);
-        if (qtyErr) throw new Error('Failed to deduct stock quantity');
+        // Which table sheet.sourceStockId actually belongs to can't be
+        // read off sheet.origin alone — a legacy 'remnant' inv_stock row
+        // (from before this waste/stock split was removed) is ALSO
+        // tagged algorithm-origin 'waste' by generatePlan above, so it
+        // needs the inv_stock quantity path, not the inv_waste deletion
+        // path. Looking the id up against the actual current lists
+        // disambiguates correctly regardless.
+        const isFromWastePool = wasteLines.some((w) => w.id === sheet.sourceStockId);
 
-        if (sheet.leftoverClassification === 'waste') {
-          for (const region of sheet.leftoverRegions) {
-            const { error: wasteErr } = await supabase.from('inv_waste').insert({
-              category_id: categoryId,
-              length_in: region.lengthIn,
-              width_in: region.widthIn,
-              source_plan_sheet_id: sheetRow.id,
-            });
-            if (wasteErr) throw new Error('Failed to log waste');
-          }
-        } else if (sheet.leftoverClassification === 'stock') {
-          for (const region of sheet.leftoverRegions) {
-            const { error: remnantErr } = await supabase.from('inv_stock').insert({
-              category_id: categoryId,
-              length_in: region.lengthIn,
-              width_in: region.widthIn,
-              quantity: 1,
-              origin: 'remnant',
-              source_plan_sheet_id: sheetRow.id,
-            });
-            if (remnantErr) throw new Error('Failed to log remnant stock');
-          }
+        if (isFromWastePool) {
+          // Consumed a waste offcut — it's cut up now, so it no longer
+          // exists as available material. Deleted outright rather than a
+          // quantity decrement, since inv_waste rows are always qty 1.
+          const { error: consumeErr } = await supabase.from('inv_waste').delete().eq('id', sheet.sourceStockId);
+          if (consumeErr) throw new Error('Failed to consume waste offcut');
+        } else {
+          // Sourced from inv_stock (fresh, or a legacy remnant row) —
+          // deduct one sheet as before. Reads the quantity from local
+          // state rather than a fresh SELECT — fine for this internal
+          // single-shop tool, but a real race (two confirms in flight at
+          // once) could under-count. Flagged rather than silently
+          // assumed safe.
+          const sourceLine = stockLines.find((s) => s.id === sheet.sourceStockId);
+          const currentQty = sourceLine?.quantity ?? 0;
+          const { error: qtyErr } = await supabase
+            .from('inv_stock')
+            .update({ quantity: Math.max(0, currentQty - 1) })
+            .eq('id', sheet.sourceStockId);
+          if (qtyErr) throw new Error('Failed to deduct stock quantity');
+        }
+
+        // Every leftover region is logged as waste now — no more
+        // >50%-used split creating a separate reusable-stock entry. The
+        // client's own reasoning: the algorithm already checks the waste
+        // pool first (see generatePlan above) before touching fresh
+        // stock, so a second "half-used, keep as stock" bucket added
+        // nothing — everything just goes to waste, and reuse is decided
+        // dynamically at plan time, not pre-judged by a percentage.
+        for (const region of sheet.leftoverRegions) {
+          const { error: wasteErr } = await supabase.from('inv_waste').insert({
+            category_id: categoryId,
+            length_in: region.lengthIn,
+            width_in: region.widthIn,
+            source_plan_sheet_id: sheetRow.id,
+          });
+          if (wasteErr) throw new Error('Failed to log waste');
         }
       }
     } catch (err) {
       // Best-effort rollback — the job row cascades to job_items/plan_sheets/
       // plan_sheet_items via ON DELETE CASCADE, but any inv_stock quantity
-      // already deducted or inv_waste/inv_stock remnant rows already
-      // written before the failure are NOT automatically undone (there's
-      // no cascade path back from those). Matches this codebase's existing
-      // "manual rollback, not true atomicity" tradeoff elsewhere in
-      // AppContext.tsx, but is more consequential here since it touches
-      // physical stock counts — surfacing the error rather than hiding it
+      // already deducted, inv_waste rows already deleted (consumed), or
+      // new inv_waste rows already inserted before the failure are NOT
+      // automatically undone (there's no cascade path back from those).
+      // Matches this codebase's existing "manual rollback, not true
+      // atomicity" tradeoff elsewhere in AppContext.tsx, but is more
+      // consequential here since it touches physical stock counts —
+      // surfacing the error rather than hiding it
       // is the best this can do without a working RPC path.
       await supabase.from('inv_cutting_jobs').delete().eq('id', jobRow.id);
       console.error(err);

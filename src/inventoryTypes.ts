@@ -5,7 +5,12 @@
 
 export type StockOrigin = 'fresh' | 'remnant';
 export type CuttingJobStatus = 'draft' | 'planned' | 'confirmed';
-export type LeftoverClassification = 'waste' | 'stock';
+// Every leftover region is waste now — no more 50%-used stock/waste split
+// (see InventoryContext.tsx's generatePlan/confirmCut). The DB check
+// constraint on inv_plan_sheets.leftover_classification still technically
+// allows 'stock' for backward compatibility with any historical rows, but
+// the app never writes it going forward.
+export type LeftoverClassification = 'waste';
 
 export interface StockCategory {
   id: string;
