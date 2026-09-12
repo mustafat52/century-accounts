@@ -120,68 +120,120 @@ function fitsWithinBounds(
  * shelf; failing that, try opening a new shelf in the sheet's remaining
  * height. Mutates `sheet.shelves`/`sheet.placed` on success.
  */
+interface PlacementCandidate {
+  shelfIndex: number | null; // null means "open a new shelf"
+  rotated: boolean;
+  placedWidthIn: number;
+  placedLengthIn: number;
+  wastedWidthIn: number; // what to minimize — the tightness of this specific fit
+}
+
+/**
+ * Tries to place `piece` onto `sheet` using shelf packing with a proper
+ * best-fit search: every existing shelf is checked in BOTH orientations
+ * (not "un-rotated first, rotated only if un-rotated doesn't fit at
+ * all"), and whichever valid combination wastes the least width is
+ * chosen. Existing shelves are always preferred over opening a new one
+ * when any of them can fit the piece in either orientation — spending
+ * fresh vertical height should be a last resort, not a tie-breaker
+ * against a slightly-worse-fitting existing row. Only when no open shelf
+ * fits at all does opening a new shelf get considered, and even then both
+ * orientations of the new shelf are compared the same way.
+ */
 function tryPlaceOnSheet(piece: Piece, sheet: OpenSheet): boolean {
-  for (const shelf of sheet.shelves) {
+  const existingShelfCandidates: PlacementCandidate[] = [];
+
+  sheet.shelves.forEach((shelf, shelfIndex) => {
     const remainingWidth = sheet.widthIn - shelf.usedWidth;
 
     if (piece.widthIn <= remainingWidth && piece.lengthIn <= shelf.height) {
-      sheet.placed.push({
-        pieceId: piece.id,
-        widthIn: piece.widthIn,
-        lengthIn: piece.lengthIn,
-        xIn: shelf.usedWidth,
-        yIn: shelf.y,
+      existingShelfCandidates.push({
+        shelfIndex,
         rotated: false,
+        placedWidthIn: piece.widthIn,
+        placedLengthIn: piece.lengthIn,
+        wastedWidthIn: remainingWidth - piece.widthIn,
       });
-      shelf.usedWidth += piece.widthIn;
-      return true;
     }
 
     if (piece.lengthIn <= remainingWidth && piece.widthIn <= shelf.height) {
+      existingShelfCandidates.push({
+        shelfIndex,
+        rotated: true,
+        placedWidthIn: piece.lengthIn,
+        placedLengthIn: piece.widthIn,
+        wastedWidthIn: remainingWidth - piece.lengthIn,
+      });
+    }
+  });
+
+  const applyCandidate = (candidate: PlacementCandidate) => {
+    if (candidate.shelfIndex === null) {
+      const usedHeight = sheet.shelves.reduce((sum, s) => sum + s.height, 0);
+      sheet.shelves.push({ y: usedHeight, height: candidate.placedLengthIn, usedWidth: candidate.placedWidthIn });
       sheet.placed.push({
         pieceId: piece.id,
-        widthIn: piece.lengthIn,
-        lengthIn: piece.widthIn,
+        widthIn: candidate.placedWidthIn,
+        lengthIn: candidate.placedLengthIn,
+        xIn: 0,
+        yIn: usedHeight,
+        rotated: candidate.rotated,
+      });
+    } else {
+      const shelf = sheet.shelves[candidate.shelfIndex];
+      sheet.placed.push({
+        pieceId: piece.id,
+        widthIn: candidate.placedWidthIn,
+        lengthIn: candidate.placedLengthIn,
         xIn: shelf.usedWidth,
         yIn: shelf.y,
-        rotated: true,
+        rotated: candidate.rotated,
       });
-      shelf.usedWidth += piece.lengthIn;
-      return true;
+      shelf.usedWidth += candidate.placedWidthIn;
     }
+  };
+
+  if (existingShelfCandidates.length > 0) {
+    // Tightest fit wins — smallest leftover width on whichever shelf/
+    // orientation combination is chosen, checked across ALL open shelves
+    // and BOTH orientations, not just the first one that happens to fit.
+    const best = existingShelfCandidates.reduce((a, b) => (b.wastedWidthIn < a.wastedWidthIn ? b : a));
+    applyCandidate(best);
+    return true;
   }
 
-  // No existing shelf had room — try opening a new one above the last.
+  // No existing shelf fits in either orientation — only now consider
+  // opening a new one, again checking both orientations and taking
+  // whichever wastes less width on that new row.
   const usedHeight = sheet.shelves.reduce((sum, s) => sum + s.height, 0);
   const remainingHeight = sheet.lengthIn - usedHeight;
+  const newShelfCandidates: PlacementCandidate[] = [];
 
   if (piece.lengthIn <= remainingHeight && piece.widthIn <= sheet.widthIn) {
-    sheet.shelves.push({ y: usedHeight, height: piece.lengthIn, usedWidth: piece.widthIn });
-    sheet.placed.push({
-      pieceId: piece.id,
-      widthIn: piece.widthIn,
-      lengthIn: piece.lengthIn,
-      xIn: 0,
-      yIn: usedHeight,
+    newShelfCandidates.push({
+      shelfIndex: null,
       rotated: false,
+      placedWidthIn: piece.widthIn,
+      placedLengthIn: piece.lengthIn,
+      wastedWidthIn: sheet.widthIn - piece.widthIn,
     });
-    return true;
   }
 
   if (piece.widthIn <= remainingHeight && piece.lengthIn <= sheet.widthIn) {
-    sheet.shelves.push({ y: usedHeight, height: piece.widthIn, usedWidth: piece.lengthIn });
-    sheet.placed.push({
-      pieceId: piece.id,
-      widthIn: piece.lengthIn,
-      lengthIn: piece.widthIn,
-      xIn: 0,
-      yIn: usedHeight,
+    newShelfCandidates.push({
+      shelfIndex: null,
       rotated: true,
+      placedWidthIn: piece.lengthIn,
+      placedLengthIn: piece.widthIn,
+      wastedWidthIn: sheet.widthIn - piece.lengthIn,
     });
-    return true;
   }
 
-  return false;
+  if (newShelfCandidates.length === 0) return false;
+
+  const best = newShelfCandidates.reduce((a, b) => (b.wastedWidthIn < a.wastedWidthIn ? b : a));
+  applyCandidate(best);
+  return true;
 }
 
 /**
