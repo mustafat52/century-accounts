@@ -263,6 +263,14 @@ export default function PrintableDocument() {
 
   const invoice = printTarget.kind === 'invoice' ? invoices.find((i) => i.id === printTarget.id) : undefined;
   const quotation = printTarget.kind === 'quotation' ? quotations.find((q) => q.id === printTarget.id) : undefined;
+  // Convert no longer requires full payment (a quotation can be settled
+  // afterward), so an invoice's real payment status has to be checked
+  // live off its source quotation every time it's printed — never assumed
+  // just because it's an invoice.
+  const invoiceSourceQuotation = invoice?.sourceQuotationId
+    ? quotations.find((q) => q.dbId === invoice.sourceQuotationId)
+    : undefined;
+  const invoiceBalanceRemaining = invoiceSourceQuotation?.balanceAmount ?? 0;
 
   const doc = invoice ?? quotation;
   if (!doc) return null;
@@ -449,7 +457,9 @@ export default function PrintableDocument() {
           <div className="receipt-footer">
             <div>
               {isInvoice
-                ? 'Thank you for your business. Paid in full.'
+                ? invoiceBalanceRemaining > 0
+                  ? `Thank you for your business — a balance of ${formatINR(invoiceBalanceRemaining)} remains outstanding on this invoice.`
+                  : 'All payments for this invoice have been cleared, settling the balance in full. It has been a pleasure working with you — thank you for your business.'
                 : 'This quotation is an estimate and subject to confirmation at the time of order.'}
             </div>
             <div className="receipt-signature">

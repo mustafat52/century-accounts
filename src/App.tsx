@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider, useApp } from './context/AppContext';
 import { InventoryProvider } from './context/InventoryContext';
+import { useArrowFieldNavigation } from './hooks/useArrowFieldNavigation';
 import Sidebar from './components/Sidebar';
 import MobileNav from './components/MobileNav';
 import InventorySidebar from './components/InventorySidebar';
@@ -100,6 +101,10 @@ function InventoryShell() {
 }
 
 export default function App() {
+  // App-wide, mounted once — works on every field everywhere, including
+  // the Login page, since it's above the auth gate.
+  useArrowFieldNavigation();
+
   return (
     <AppProvider>
       <Routes>

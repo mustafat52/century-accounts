@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useInventory, type CuttingJobItemInput } from '../../context/InventoryContext';
 import { parseFractionInches, formatFractionInches } from '../../lib/fractionInches';
 import type { PlacedPiece, PlanResult, SheetUsage } from '../../lib/cuttingAlgorithm';
@@ -11,6 +11,52 @@ import {
   type DraftRow,
 } from '../../lib/sheetGrouping';
 import { CuttingTicket } from '../../components/CuttingTicket';
+
+// Persists the in-progress batch entry (and, once generated, the plan
+// itself) across navigation — without this, switching to another page
+// and coming back wiped out everything the person had typed, since it
+// only ever lived in this component's own React state. sessionStorage
+// rather than localStorage: this is recoverable scratch work, not data
+// worth keeping forever — it should clear itself out when the tab closes,
+// same as if the person had never left.
+const DRAFT_STORAGE_KEY = 'cga:cutting-plan-draft';
+
+interface CuttingPlanDraft {
+  categoryId: string;
+  rows: DraftRow[];
+  plan: PlanResult | null;
+  planRows: DraftRow[];
+  confirmedItems: CuttingJobItemInput[] | null;
+}
+
+function loadDraft(): CuttingPlanDraft | null {
+  try {
+    const raw = sessionStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as CuttingPlanDraft;
+  } catch {
+    // Corrupt JSON, storage disabled (private browsing), quota issues —
+    // any of these just means no draft to restore, not a page-breaking error.
+    return null;
+  }
+}
+
+function saveDraft(draft: CuttingPlanDraft) {
+  try {
+    sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+  } catch {
+    // Losing the draft-recovery convenience is fine — silently no-op
+    // rather than breaking the page over a nice-to-have.
+  }
+}
+
+function clearDraft() {
+  try {
+    sessionStorage.removeItem(DRAFT_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
 
 function SheetDiagram({ sheet, rows }: { sheet: SheetUsage; rows: DraftRow[] }) {
   const labelSize = Math.max(sheet.sheetWidthIn, sheet.sheetLengthIn) * 0.032;
@@ -119,16 +165,29 @@ function SheetDiagram({ sheet, rows }: { sheet: SheetUsage; rows: DraftRow[] }) 
 export default function CuttingPlan() {
   const { categories, generatePlan, confirmCut } = useInventory();
 
-  const [categoryId, setCategoryId] = useState('');
-  const [rows, setRows] = useState<DraftRow[]>([newDraftRow()]);
+  // Read once on mount rather than per-field — five separate
+  // sessionStorage reads for one draft object is wasteful, and this way
+  // the restored values are all consistent with each other.
+  const [initialDraft] = useState(() => loadDraft());
+
+  const [categoryId, setCategoryId] = useState(initialDraft?.categoryId ?? '');
+  const [rows, setRows] = useState<DraftRow[]>(initialDraft?.rows ?? [newDraftRow()]);
   const [error, setError] = useState('');
-  const [plan, setPlan] = useState<PlanResult | null>(null);
-  const [planRows, setPlanRows] = useState<DraftRow[]>([]); // rows as they were AT generation time, so labels stay correct even if the form is edited afterward
-  const [confirmedItems, setConfirmedItems] = useState<CuttingJobItemInput[] | null>(null);
+  const [plan, setPlan] = useState<PlanResult | null>(initialDraft?.plan ?? null);
+  const [planRows, setPlanRows] = useState<DraftRow[]>(initialDraft?.planRows ?? []); // rows as they were AT generation time, so labels stay correct even if the form is edited afterward
+  const [confirmedItems, setConfirmedItems] = useState<CuttingJobItemInput[] | null>(initialDraft?.confirmedItems ?? null);
   const [confirming, setConfirming] = useState(false);
   const [confirmedMessage, setConfirmedMessage] = useState('');
   const [activeGroupIndex, setActiveGroupIndex] = useState(0);
   const [isTicketOpen, setIsTicketOpen] = useState(false);
+
+  // Persist on every change to categoryId/rows/plan/planRows/confirmedItems
+  // — this is what actually fixes the bug: without it, navigating away
+  // and back only had whatever was in memory, which React had already
+  // thrown out the moment the page unmounted.
+  useEffect(() => {
+    saveDraft({ categoryId, rows, plan, planRows, confirmedItems });
+  }, [categoryId, rows, plan, planRows, confirmedItems]);
 
   const totalPieces = useMemo(
     () => rows.reduce((sum, r) => sum + (parseInt(r.quantityRaw, 10) || 0), 0),
@@ -189,6 +248,7 @@ export default function CuttingPlan() {
     setPlanRows([]);
     setConfirmedItems(null);
     setRows([newDraftRow()]);
+    clearDraft();
   }
 
   return (
