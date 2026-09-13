@@ -237,24 +237,91 @@ function tryPlaceOnSheet(piece: Piece, sheet: OpenSheet): boolean {
 }
 
 /**
- * Picks which stock to pull when no open sheet has room for a piece.
- * Existing waste offcuts are checked first (client's own instruction:
- * always check whether a requested size can already be cut from the
- * waste pool before touching a fresh sheet — there's no reason to keep
- * some leftovers in a separate reusable-stock bucket when the algorithm
- * checks waste first anyway); within whichever pool has a fit, the
- * smallest-area candidate that fits is chosen, so sheet selection doesn't
- * burn a large sheet on a small piece when a smaller one would do.
+ * Picks a WASTE offcut to pull when no open sheet has room for a piece.
+ * Client's own instruction: always check whether a requested size can
+ * already be cut from the waste pool before touching a fresh sheet.
+ * Waste pieces are one-off irregular offcuts, not a curated size lineup —
+ * so unlike fresh-stock selection below, this doesn't simulate ahead
+ * against the rest of the order; it just takes the smallest offcut that
+ * fits this one piece, same as before.
  */
-function pickStockForPiece(pool: AvailableStock[], piece: Piece): AvailableStock | null {
-  const candidates = pool.filter((s) => s.quantity > 0 && fitsWithinBounds(piece, s));
+function pickWasteForPiece(pool: AvailableStock[], piece: Piece): AvailableStock | null {
+  const candidates = pool.filter((s) => s.origin === 'waste' && s.quantity > 0 && fitsWithinBounds(piece, s));
   if (candidates.length === 0) return null;
+  return candidates.reduce((smallest, s) => (pieceArea(s) < pieceArea(smallest) ? s : smallest));
+}
 
-  const wastePieces = candidates.filter((s) => s.origin === 'waste');
-  const chosenPool = wastePieces.length > 0 ? wastePieces : candidates.filter((s) => s.origin === 'fresh');
-  if (chosenPool.length === 0) return null;
+/**
+ * Packs as many of `pieces` (already sorted largest-first, same order the
+ * real loop uses) onto ONE fresh sheet of the given size as will fit,
+ * using the exact same shelf best-fit logic as the real packer — this is
+ * a throwaway simulation purely to estimate how well a candidate stock
+ * SIZE would serve everything still waiting to be cut, not an actual
+ * placement. Nothing here touches the real plan.
+ */
+function simulateFitCount(pieces: Piece[], lengthIn: number, widthIn: number): number {
+  const sheet: OpenSheet = { stockId: '__sim__', lengthIn, widthIn, origin: 'fresh', shelves: [], placed: [] };
+  let count = 0;
+  for (const piece of pieces) {
+    if (tryPlaceOnSheet(piece, sheet)) count++;
+  }
+  return count;
+}
 
-  return chosenPool.reduce((smallest, s) => (pieceArea(s) < pieceArea(smallest) ? s : smallest));
+/**
+ * Picks which FRESH stock SIZE to open a new sheet from — not just
+ * whatever's smallest enough for the one piece in front of it, but
+ * whichever available size needs the fewest total further sheets for
+ * everything still left to cut. Small sizes are checked first; a bigger
+ * size only wins if it demonstrably clears the remaining queue in fewer
+ * sheets, not merely because it happens to have room to spare. This is
+ * what stops the algorithm from grabbing 20 small sheets one-at-a-time
+ * when a single large sheet could have fit 16 of those same pieces at
+ * once — see the worked example in this project's own notes.
+ */
+function pickFreshStockForRemainingPieces(pool: AvailableStock[], remainingPieces: Piece[]): AvailableStock | null {
+  const currentPiece = remainingPieces[0];
+  const freshCandidates = pool.filter((s) => s.origin === 'fresh' && s.quantity > 0 && fitsWithinBounds(currentPiece, s));
+  if (freshCandidates.length === 0) return null;
+
+  // Distinct SIZES only — several stock rows can share identical
+  // dimensions (added at different times), and simulation only cares
+  // about the size, not which specific row supplies it.
+  const sizeKey = (s: AvailableStock) => `${s.lengthIn}x${s.widthIn}`;
+  const distinctSizes = new Map<string, AvailableStock>();
+  for (const s of freshCandidates) {
+    if (!distinctSizes.has(sizeKey(s))) distinctSizes.set(sizeKey(s), s);
+  }
+  const sizesSmallToLarge = [...distinctSizes.values()].sort((a, b) => pieceArea(a) - pieceArea(b));
+
+  let bestSize: AvailableStock | null = null;
+  let bestProjectedSheets = Infinity;
+
+  for (const size of sizesSmallToLarge) {
+    const fitCount = simulateFitCount(remainingPieces, size.lengthIn, size.widthIn);
+    if (fitCount === 0) continue; // shouldn't happen for the first (current) piece, but guards the rest
+
+    if (fitCount >= remainingPieces.length) {
+      // This size alone clears everything still left to cut — and since
+      // sizes are checked smallest-first, this is the smallest size that
+      // does, so nothing bigger could possibly do better. Stop here.
+      bestSize = size;
+      break;
+    }
+
+    const projectedSheets = Math.ceil(remainingPieces.length / fitCount);
+    if (projectedSheets < bestProjectedSheets) {
+      bestProjectedSheets = projectedSheets;
+      bestSize = size;
+    }
+    // Ties keep the earlier (smaller) size, since sizesSmallToLarge is
+    // already ascending and this only overwrites on a strict improvement.
+  }
+
+  if (!bestSize) return null;
+  // Consume from an actual stock row matching the chosen size — any one
+  // will do, they're fungible if truly identical dimensions.
+  return freshCandidates.find((s) => sizeKey(s) === sizeKey(bestSize!)) ?? null;
 }
 
 /**
@@ -307,7 +374,8 @@ export function generateCuttingPlan(pieces: Piece[], availableStock: AvailableSt
   const openSheets: OpenSheet[] = [];
   const unfulfillable: Piece[] = [];
 
-  for (const piece of sorted) {
+  for (let i = 0; i < sorted.length; i++) {
+    const piece = sorted[i];
     let placed = false;
     for (const sheet of openSheets) {
       if (tryPlaceOnSheet(piece, sheet)) {
@@ -317,7 +385,11 @@ export function generateCuttingPlan(pieces: Piece[], availableStock: AvailableSt
     }
     if (placed) continue;
 
-    const chosen = pickStockForPiece(pool, piece);
+    // Waste first, exactly as before. Only when nothing in the waste
+    // pool fits does size selection move to the lookahead-aware fresh
+    // picker below, which looks at every piece still left in the queue
+    // (this piece included) — not just this one in isolation.
+    const chosen = pickWasteForPiece(pool, piece) ?? pickFreshStockForRemainingPieces(pool, sorted.slice(i));
     if (!chosen) {
       unfulfillable.push(piece);
       continue;
