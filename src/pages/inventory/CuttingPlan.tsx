@@ -235,20 +235,31 @@ export default function CuttingPlan() {
   async function handleConfirmCut() {
     if (!plan || !confirmedItems || !categoryId) return;
     setConfirming(true);
-    const ok = await confirmCut(categoryId, confirmedItems, plan);
-    setConfirming(false);
-    if (!ok) {
-      setError('Could not commit the cut — stock and waste were not changed. Nothing was saved.');
-      return;
+    try {
+      const ok = await confirmCut(categoryId, confirmedItems, plan);
+      if (!ok) {
+        setError('Could not commit the cut — stock and waste were not changed. Nothing was saved.');
+        return;
+      }
+      setConfirmedMessage(
+        `Cut confirmed: ${plan.sheets.length} sheet${plan.sheets.length === 1 ? '' : 's'} used, stock updated.`
+      );
+      setPlan(null);
+      setPlanRows([]);
+      setConfirmedItems(null);
+      setRows([newDraftRow()]);
+      clearDraft();
+    } catch (err) {
+      // An unexpected throw here (as opposed to confirmCut resolving to
+      // false) still needs to surface as an error rather than silently
+      // leaving the button stuck — but see confirmCut's own comment:
+      // it's built so a real commit failure resolves to false rather
+      // than throwing, so reaching this catch should be rare.
+      console.error(err);
+      setError('Something went wrong confirming the cut. Check the Categories & Stock and Waste pages before retrying.');
+    } finally {
+      setConfirming(false);
     }
-    setConfirmedMessage(
-      `Cut confirmed: ${plan.sheets.length} sheet${plan.sheets.length === 1 ? '' : 's'} used, stock updated.`
-    );
-    setPlan(null);
-    setPlanRows([]);
-    setConfirmedItems(null);
-    setRows([newDraftRow()]);
-    clearDraft();
   }
 
   return (

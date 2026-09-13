@@ -207,6 +207,22 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
     insertedJobItems.forEach((row: any) => jobItemIdByRow.set(row.sort_order, row.id));
 
     try {
+      // Running tally of stock quantities as they're consumed
+      // sheet-by-sheet within THIS confirm — seeded from current state,
+      // then updated locally after each deduction. Without this, two
+      // sheets in the same job drawing from the same stock row would
+      // both read the same stale starting quantity and both write
+      // "starting - 1", silently undercounting consumption whenever a
+      // job uses more than one sheet of an identical stock line.
+      //
+      // This only fixes that WITHIN one confirm — it still reads from
+      // local React state, not a fresh SELECT, so two genuinely
+      // concurrent confirms (two browser tabs/sessions committing at the
+      // same moment) could still race against each other. Fine for this
+      // internal single-shop tool; flagged rather than silently assumed
+      // airtight.
+      const runningStockQuantities = new Map<string, number>(stockLines.map((s) => [s.id, s.quantity]));
+
       for (let sheetIdx = 0; sheetIdx < plan.sheets.length; sheetIdx++) {
         const sheet = plan.sheets[sheetIdx];
 
@@ -269,20 +285,16 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
           // quantity decrement, since inv_waste rows are always qty 1.
           const { error: consumeErr } = await supabase.from('inv_waste').delete().eq('id', sheet.sourceStockId);
           if (consumeErr) throw new Error('Failed to consume waste offcut');
-        } else {
+        }  else {
           // Sourced from inv_stock (fresh, or a legacy remnant row) —
-          // deduct one sheet as before. Reads the quantity from local
-          // state rather than a fresh SELECT — fine for this internal
-          // single-shop tool, but a real race (two confirms in flight at
-          // once) could under-count. Flagged rather than silently
-          // assumed safe.
-          const sourceLine = stockLines.find((s) => s.id === sheet.sourceStockId);
-          const currentQty = sourceLine?.quantity ?? 0;
-          const { error: qtyErr } = await supabase
-            .from('inv_stock')
-            .update({ quantity: Math.max(0, currentQty - 1) })
-            .eq('id', sheet.sourceStockId);
+          // deduct one sheet, reading from the running tally (which
+          // reflects any earlier sheets in this SAME confirm that already
+          // drew from this row) rather than the original snapshot.
+          const currentQty = runningStockQuantities.get(sheet.sourceStockId) ?? 0;
+          const newQty = Math.max(0, currentQty - 1);
+          const { error: qtyErr } = await supabase.from('inv_stock').update({ quantity: newQty }).eq('id', sheet.sourceStockId);
           if (qtyErr) throw new Error('Failed to deduct stock quantity');
+          runningStockQuantities.set(sheet.sourceStockId, newQty);
         }
 
         // Every leftover region is logged as waste now — no more
@@ -318,9 +330,22 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
       return false;
     }
 
-    await loadAllData();
+     // The actual commit (job, stock deduction, waste logging) already
+    // fully succeeded by this point — a failure here is just the
+    // afterward UI refresh, not a failed cut. Reporting the whole
+    // operation as failed over a refresh hiccup would be actively
+    // misleading (and would leave the person re-confirming a cut that
+    // already happened). Local state is stale until the next reload if
+    // this fails, but the database is correct.
+    try {
+      await loadAllData();
+    } catch (err) {
+      console.error('Cut confirmed successfully, but refreshing the page data afterward failed:', err);
+    }
     return true;
   };
+ 
+  
 
   const value = useMemo<InventoryContextValue>(
     () => ({
