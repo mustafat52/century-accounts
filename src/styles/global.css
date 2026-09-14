@@ -31,6 +31,17 @@
 
 html, body, #root { height: 100%; }
 
+/* Nothing should ever be able to push the whole PAGE into horizontal
+   scroll — on mobile that drags the topbar, nav, and everything else
+   sideways along with whichever table caused it, which is exactly the
+   "unusable on a phone" complaint this fixes. Genuinely wide content
+   (data tables) gets its own contained horizontal scroll via
+   .table-scroll instead — see below — so the data's still reachable,
+   it just scrolls in place rather than taking the whole screen with it.
+   This rule is a backstop for anything .table-scroll doesn't already
+   catch, not the primary fix. */
+html, body { overflow-x: hidden; }
+
 body {
   margin: 0;
   background: var(--bg);
@@ -318,6 +329,7 @@ tbody tr:hover { background: var(--surface-2); }
    screens instead of getting hard-clipped by .panel's overflow: hidden. */
 .table-scroll {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; }
@@ -390,7 +402,7 @@ tbody tr:hover { background: var(--surface-2); }
 
 .modal-body { padding: 20px 22px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; flex: 1; min-height: 0; }
 
-.form-row { display: flex; gap: 14px; }
+.form-row { display: flex; gap: 14px; flex-wrap: wrap; }
 .form-field { flex: 1; display: flex; flex-direction: column; gap: 6px; }
 .form-field label { font-size: 12px; color: var(--text-muted); }
 

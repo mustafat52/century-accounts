@@ -143,7 +143,8 @@ export default function Vendors() {
                 </button>
               </div>
             </div>
-            <table>
+            <div className="table-scroll">
+              <table>
               <thead>
                 <tr>
                   <th>Date</th>
@@ -236,12 +237,14 @@ export default function Vendors() {
               </tbody>
             </table>
           </div>
+          </div>
 
           <div className="panel">
             <div className="panel-head">
               <h3>Payment history</h3>
             </div>
-            <table>
+            <div className="table-scroll">
+              <table>
               <thead>
                 <tr>
                   <th>Date</th>
@@ -264,6 +267,7 @@ export default function Vendors() {
                 ))}
               </tbody>
             </table>
+          </div>
           </div>
         </div>
 
@@ -305,7 +309,8 @@ export default function Vendors() {
               </button>
             </div>
           </div>
-          <table>
+          <div className="table-scroll">
+            <table>
             <thead>
               <tr>
                 <th>Vendor</th>
@@ -337,6 +342,7 @@ export default function Vendors() {
               ))}
             </tbody>
           </table>
+        </div>
         </div>
       </div>
       <VendorModal />

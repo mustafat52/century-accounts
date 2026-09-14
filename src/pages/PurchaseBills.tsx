@@ -30,6 +30,7 @@ export default function PurchaseBills() {
               + New Purchase Bill
             </button>
           </div>
+          <div className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -71,6 +72,7 @@ export default function PurchaseBills() {
                     {isExpanded && (
                       <tr>
                         <td colSpan={7} style={{ background: 'rgba(255,255,255,0.02)' }}>
+                          <div className="table-scroll">
                           <table style={{ margin: '4px 0' }}>
                             <thead>
                               <tr>
@@ -101,6 +103,7 @@ export default function PurchaseBills() {
                               ))}
                             </tbody>
                           </table>
+                          </div>
                           {b.supplierAddress && <div className="row-sub" style={{ padding: '0 4px 8px' }}>{b.supplierAddress}</div>}
                         </td>
                       </tr>
@@ -115,6 +118,7 @@ export default function PurchaseBills() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
       <PurchaseBillModal isOpen={isModalOpen} onClose={() => setModalOpen(false)} />

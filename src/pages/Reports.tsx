@@ -369,7 +369,8 @@ export default function Reports() {
             <div className="panel-head">
               <h3>Quotation status — {periodLabel.toLowerCase()}</h3>
             </div>
-            <table>
+            <div className="table-scroll">
+              <table>
               <thead>
                 <tr>
                   <th>Status</th>
@@ -401,12 +402,14 @@ export default function Reports() {
               </tbody>
             </table>
           </div>
+          </div>
 
           <div className="panel">
             <div className="panel-head">
               <h3>Top customers — {periodLabel.toLowerCase()}</h3>
             </div>
-            <table>
+            <div className="table-scroll">
+              <table>
               <tbody>
                 {topCustomers.map((c) => (
                   <tr key={c.name}>
@@ -422,6 +425,7 @@ export default function Reports() {
               </tbody>
             </table>
           </div>
+          </div>
         </div>
 
         <div className="two-col">
@@ -429,7 +433,8 @@ export default function Reports() {
             <div className="panel-head">
               <h3>Expenses by category — {periodLabel.toLowerCase()}</h3>
             </div>
-            <table>
+            <div className="table-scroll">
+              <table>
               <tbody>
                 {expenseByCategory.map(([category, amount]) => (
                   <tr key={category}>
@@ -448,12 +453,14 @@ export default function Reports() {
               </tbody>
             </table>
           </div>
+          </div>
 
           <div className="panel">
             <div className="panel-head">
               <h3>Top vendors — {periodLabel.toLowerCase()}</h3>
             </div>
-            <table>
+            <div className="table-scroll">
+              <table>
               <tbody>
                 {topVendors.map((v) => (
                   <tr key={v.name}>
@@ -468,6 +475,7 @@ export default function Reports() {
                 )}
               </tbody>
             </table>
+          </div>
           </div>
         </div>
 
@@ -494,7 +502,8 @@ export default function Reports() {
             <div className="panel-head">
               <h3>Slab breakdown — {periodLabel.toLowerCase()}</h3>
             </div>
-            <table>
+            <div className="table-scroll">
+              <table>
               <thead>
                 <tr>
                   <th>Slab</th>
@@ -519,6 +528,7 @@ export default function Reports() {
                 )}
               </tbody>
             </table>
+          </div>
           </div>
 
           <div className="panel">
@@ -546,7 +556,8 @@ export default function Reports() {
               <h3>Receivables outstanding (as of today)</h3>
               <button className="btn btn-ghost btn-small">Export</button>
             </div>
-            <table>
+            <div className="table-scroll">
+              <table>
               <tbody>
                 {customers.filter((c) => c.outstanding > 0).map((c) => (
                   <tr key={c.id}>
@@ -561,13 +572,15 @@ export default function Reports() {
               </tbody>
             </table>
           </div>
+          </div>
 
           <div className="panel">
             <div className="panel-head">
               <h3>Payables outstanding (as of today)</h3>
               <button className="btn btn-ghost btn-small">Export</button>
             </div>
-            <table>
+            <div className="table-scroll">
+              <table>
               <tbody>
                 {vendors.filter((v) => v.payable > 0).map((v) => (
                   <tr key={v.id}>
@@ -581,6 +594,7 @@ export default function Reports() {
                 </tr>
               </tbody>
             </table>
+          </div>
           </div>
         </div>
       </div>

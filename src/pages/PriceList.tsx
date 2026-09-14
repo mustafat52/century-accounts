@@ -47,7 +47,8 @@ export default function PriceList() {
               + Add Product
             </button>
           </div>
-          <table>
+          <div className="table-scroll">
+            <table>
             <thead>
               <tr>
                 <th>Description</th>
@@ -74,6 +75,7 @@ export default function PriceList() {
               ))}
             </tbody>
           </table>
+        </div>
           {priceList.length === 0 && (
             <div style={{ padding: 20 }} className="row-sub">
               No products yet — add your first rate to start using the dropdown on invoices.

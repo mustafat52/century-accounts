@@ -132,7 +132,8 @@ export default function Invoicing() {
                   {filteredQuotations.length} quotation{filteredQuotations.length !== 1 ? 's' : ''}
                 </h3>
               </div>
-              <table>
+              <div className="table-scroll">
+                <table>
                 <thead>
                   <tr>
                     <th>Quotation</th>
@@ -214,6 +215,7 @@ export default function Invoicing() {
                 </tbody>
               </table>
             </div>
+            </div>
           </>
         )}
 
@@ -224,7 +226,8 @@ export default function Invoicing() {
                 {sortedInvoices.length} invoice{sortedInvoices.length !== 1 ? 's' : ''}
               </h3>
             </div>
-            <table>
+            <div className="table-scroll">
+              <table>
               <thead>
                 <tr>
                   <th>Invoice</th>
@@ -275,6 +278,7 @@ export default function Invoicing() {
                 ))}
               </tbody>
             </table>
+          </div>
           </div>
         )}
       </div>

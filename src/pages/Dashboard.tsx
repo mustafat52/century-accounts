@@ -129,7 +129,8 @@ export default function Dashboard() {
             <div className="panel-head">
               <h3>Needs attention</h3>
             </div>
-            <table>
+            <div className="table-scroll">
+              <table>
               <tbody>
                 {overdueQuotations.map((q) => (
                   <tr key={q.id}>
@@ -148,13 +149,15 @@ export default function Dashboard() {
               </tbody>
             </table>
           </div>
+          </div>
         </div>
 
         <div className="panel">
           <div className="panel-head">
             <h3>Recent invoices</h3>
           </div>
-          <table>
+          <div className="table-scroll">
+            <table>
             <thead>
               <tr>
                 <th>Invoice</th>
@@ -183,6 +186,7 @@ export default function Dashboard() {
               )}
             </tbody>
           </table>
+        </div>
         </div>
       </div>
     </>
