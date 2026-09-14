@@ -5,6 +5,7 @@ import { useArrowFieldNavigation } from './hooks/useArrowFieldNavigation';
 import Sidebar from './components/Sidebar';
 import MobileNav from './components/MobileNav';
 import InventorySidebar from './components/InventorySidebar';
+import InventoryMobileNav from './components/InventoryMobileNav';
 import QuotationModal from './components/QuotationModal';
 import PrintableDocument from './components/PrintableDocument';
 import Login from './pages/Login';
@@ -87,6 +88,7 @@ function InventoryShell() {
     <InventoryProvider>
       <div className="app">
         <InventorySidebar />
+        <InventoryMobileNav />
         <main className="main">
           <Routes>
             <Route path="stock" element={<CategoriesStock />} />

@@ -59,12 +59,13 @@ export default function Login() {
         alignItems: 'center',
         justifyContent: 'center',
         background: 'var(--bg)',
+        padding: 20,
       }}
     >
       <form
         onSubmit={handleSubmit}
         className="panel"
-        style={{ width: 380, padding: '32px 32px 28px', display: 'flex', flexDirection: 'column', gap: 18 }}
+        style={{ width: 380, maxWidth: '100%', padding: '32px 32px 28px', display: 'flex', flexDirection: 'column', gap: 18 }}
       >
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 4 }}>
           <img src={logoDark} alt="Century Glass Art" style={{ width: 220, height: 'auto' }} />

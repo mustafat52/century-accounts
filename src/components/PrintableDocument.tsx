@@ -144,7 +144,7 @@ export default function PrintableDocument() {
         <div className="receipt-toolbar no-print">
           {quotation.status === 'pending' && (
             <button
-              className="btn btn-primary"
+              className="btn btn-primary desktop-only"
               onClick={async () => {
                 await convertQuotationToInvoice(quotation.dbId);
                 closePrint();

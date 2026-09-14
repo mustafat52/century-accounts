@@ -37,6 +37,11 @@ body {
   color: var(--text);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
+  /* Safe-area padding for notches/home-indicators when installed as a
+     standalone PWA (no-op, falls back to 0, on browsers/devices without
+     one — env() with a fallback is safe to always include). */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 button, input, select {
@@ -660,16 +665,54 @@ tbody tr:hover { background: var(--surface-2); }
     background: var(--gold-dim);
   }
 
+  button.mobile-nav-tab {
+    background: none;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
   .mobile-nav-banner {
     font-size: 11px;
     color: var(--text-muted);
     padding: 0 14px 10px;
   }
 
+  .mobile-nav-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 14px 10px;
+  }
+
+  .mobile-nav-foot .mobile-nav-banner { padding: 0; flex: 1; }
+
+  .mobile-nav-logout {
+    flex: 0 0 auto;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 11px;
+    padding: 5px 10px;
+    border-radius: 20px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .mobile-nav-logout:hover { color: var(--text); border-color: var(--gold); }
+
   .desktop-only { display: none !important; }
 
   .topbar { flex-direction: column; align-items: flex-start; gap: 10px; padding: 20px 20px 16px; }
   .view-body { padding: 20px; }
+
+  /* Prevents iOS Safari from auto-zooming the page when a text field is
+     focused — it does this for any input below 16px font-size. Only a
+     handful of inputs remain interactive on mobile (login, search boxes,
+     the Reports custom-range month pickers) since everything else is
+     hidden by .desktop-only, but this covers all of them without having
+     to track each one down individually. */
+  input, select, textarea { font-size: 16px; }
+  .form-field input, .form-field select { font-size: 16px; }
 }
 
 /* ---------- Welcome overlay (post-login) ---------- */

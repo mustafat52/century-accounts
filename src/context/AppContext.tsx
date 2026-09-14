@@ -30,6 +30,8 @@ import type {
 } from '../types';
 import { SLAB_DISCOUNT_PERCENT } from '../types';
 import { supabase } from '../lib/supabaseClient';
+import { guardMobile } from '../lib/mobileGuard';
+import { useIsMobile } from '../hooks/useIsMobile';
 import {
   mapCustomerBalance,
   mapVendorBalance,
@@ -308,6 +310,13 @@ interface AppContextValue {
   currentUserName: string | null;
   login: (email: string, password: string) => Promise<string | null>;
   logout: () => Promise<void>;
+
+  // True below the mobile breakpoint (see useIsMobile.ts). Every mutating
+  // function on this context already no-ops itself when this is true
+  // (see guardMobile below) — components mainly need this for deciding
+  // what to RENDER (e.g. an inline-editable field vs. plain text), not
+  // for deciding whether it's safe to call an action.
+  isMobileView: boolean;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -357,6 +366,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
   const isAuthenticated = Boolean(session);
+  const isMobileView = useIsMobile();
 
   // ---------- Data loading ----------
   const refreshCustomers = useCallback(async () => {
@@ -1220,50 +1230,54 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AppContextValue>(
     () => ({
       gstEnabled,
-      toggleGst,
+      // Every mutating action below is wrapped with guardMobile — a
+      // second layer behind the UI's `desktop-only` classes (see
+      // src/lib/mobileGuard.ts). Read-only values, fetches, and modal
+      // open/close toggles are passed through unwrapped.
+      toggleGst: guardMobile(toggleGst, isMobileView),
       customers,
-      addCustomer,
-      updateCustomer,
+      addCustomer: guardMobile(addCustomer, isMobileView),
+      updateCustomer: guardMobile(updateCustomer, isMobileView),
       vendors,
-      addVendor,
-      updateVendor,
+      addVendor: guardMobile(addVendor, isMobileView),
+      updateVendor: guardMobile(updateVendor, isMobileView),
       expenses,
-      addExpense,
+      addExpense: guardMobile(addExpense, isMobileView),
       vendorPurchases,
       vendorPayments,
-      addVendorPurchase,
-      recordVendorPayment,
+      addVendorPurchase: guardMobile(addVendorPurchase, isMobileView),
+      recordVendorPayment: guardMobile(recordVendorPayment, isMobileView),
       vendorSlips,
-      addVendorSlip,
-      priceVendorSlip,
+      addVendorSlip: guardMobile(addVendorSlip, isMobileView),
+      priceVendorSlip: guardMobile(priceVendorSlip, isMobileView),
       purchaseBills,
-      addPurchaseBill,
+      addPurchaseBill: guardMobile(addPurchaseBill, isMobileView),
       monthlyFigures,
       dashboardSummary,
       invoices,
-      rollbackInvoiceToQuotation,
+      rollbackInvoiceToQuotation: guardMobile(rollbackInvoiceToQuotation, isMobileView),
       quotations,
-      addQuotation,
-      updateQuotation,
+      addQuotation: guardMobile(addQuotation, isMobileView),
+      updateQuotation: guardMobile(updateQuotation, isMobileView),
       fetchQuotationItems,
       fetchQuotationItemsForPrint,
-      convertQuotationToInvoice,
-      deleteQuotation,
+      convertQuotationToInvoice: guardMobile(convertQuotationToInvoice, isMobileView),
+      deleteQuotation: guardMobile(deleteQuotation, isMobileView),
       quotationPayments,
-      recordQuotationPayment,
+      recordQuotationPayment: guardMobile(recordQuotationPayment, isMobileView),
       workers,
-      addWorker,
-      updateWorker,
+      addWorker: guardMobile(addWorker, isMobileView),
+      updateWorker: guardMobile(updateWorker, isMobileView),
       workerAdvances,
-      logWorkerAdvance,
+      logWorkerAdvance: guardMobile(logWorkerAdvance, isMobileView),
       workerPayments,
-      recordWorkerPayment,
+      recordWorkerPayment: guardMobile(recordWorkerPayment, isMobileView),
       links,
-      addLink,
+      addLink: guardMobile(addLink, isMobileView),
       priceList,
-      addPriceListItem,
-      updatePriceListItem,
-      deletePriceListItem,
+      addPriceListItem: guardMobile(addPriceListItem, isMobileView),
+      updatePriceListItem: guardMobile(updatePriceListItem, isMobileView),
+      deletePriceListItem: guardMobile(deletePriceListItem, isMobileView),
       isCustomerModalOpen,
       editingCustomerId,
       openCustomerModal: () => {
@@ -1348,9 +1362,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       currentUserName,
       login,
       logout,
+      isMobileView,
     }),
     [
       gstEnabled,
+      isMobileView,
       customers,
       vendors,
       expenses,

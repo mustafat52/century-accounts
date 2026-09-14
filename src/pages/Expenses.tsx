@@ -84,40 +84,42 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
             />
           </div>
 
-          <div className="section-title">Record Payment</div>
-          <div className="row-sub" style={{ marginBottom: 8 }}>
-            Just type the amount — it's automatically counted as an <strong>Advance</strong> if it
-            doesn't cover everything still owed this month, or a <strong>Salary Settlement</strong> if
-            it covers (or exceeds) what's left.
-          </div>
-          <div className="form-row">
-            <div className="form-field">
-              <label>Amount (₹)</label>
-              <input
-                type="number"
-                value={payAmount}
-                onChange={(e) => setPayAmount(e.target.value)}
-                placeholder={String(worker.remainingThisMonth)}
-              />
-            </div>
-            <div className="form-field">
-              <label>Date paid</label>
-              <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
-            </div>
-            <div className="form-field">
-              <label>Note (optional)</label>
-              <input type="text" value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="e.g. Paid via bank transfer" />
-            </div>
-          </div>
-          {payAmountNum > 0 && (
+          <div className="desktop-only">
+            <div className="section-title">Record Payment</div>
             <div className="row-sub" style={{ marginBottom: 8 }}>
-              This will be recorded as {willSettle ? <strong>a Salary Settlement</strong> : <strong>an Advance</strong>}.
+              Just type the amount — it's automatically counted as an <strong>Advance</strong> if it
+              doesn't cover everything still owed this month, or a <strong>Salary Settlement</strong> if
+              it covers (or exceeds) what's left.
             </div>
-          )}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
-            <button className="btn btn-primary btn-small" onClick={handleRecordPayment} disabled={payAmountNum <= 0 || saving}>
-              {saving ? 'Saving…' : 'Record Payment'}
-            </button>
+            <div className="form-row">
+              <div className="form-field">
+                <label>Amount (₹)</label>
+                <input
+                  type="number"
+                  value={payAmount}
+                  onChange={(e) => setPayAmount(e.target.value)}
+                  placeholder={String(worker.remainingThisMonth)}
+                />
+              </div>
+              <div className="form-field">
+                <label>Date paid</label>
+                <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
+              </div>
+              <div className="form-field">
+                <label>Note (optional)</label>
+                <input type="text" value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="e.g. Paid via bank transfer" />
+              </div>
+            </div>
+            {payAmountNum > 0 && (
+              <div className="row-sub" style={{ marginBottom: 8 }}>
+                This will be recorded as {willSettle ? <strong>a Salary Settlement</strong> : <strong>an Advance</strong>}.
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+              <button className="btn btn-primary btn-small" onClick={handleRecordPayment} disabled={payAmountNum <= 0 || saving}>
+                {saving ? 'Saving…' : 'Record Payment'}
+              </button>
+            </div>
           </div>
 
           <div className="section-title">Advance history</div>
@@ -182,7 +184,7 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
             Close
           </button>
           <button
-            className="btn btn-ghost"
+            className="btn btn-ghost desktop-only"
             onClick={() => {
               onClose();
               openEditWorkerModal(worker.id);

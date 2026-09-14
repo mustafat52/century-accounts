@@ -3,6 +3,8 @@ import type { StockCategory, StockLine, WasteLine, NewStockCategoryInput, NewSto
 import { supabase } from '../lib/supabaseClient';
 import { mapStockCategory, mapStockLine, mapWasteLine } from '../lib/inventoryMappers';
 import { generateCuttingPlan, type Piece, type AvailableStock, type PlanResult } from '../lib/cuttingAlgorithm';
+import { guardMobile } from '../lib/mobileGuard';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 export interface CuttingJobItemInput {
   lengthIn: number;
@@ -36,6 +38,9 @@ interface InventoryContextValue {
   // open/close-modal pattern, mirrored from AppContext — no inventory
   // modals exist yet in Phase 1, but Phase 2's cutting-plan flow will add
   // one here the same way InvoiceModal etc. are wired in AppContext.
+
+  // See AppContext's isMobileView — same meaning here.
+  isMobileView: boolean;
 }
 
 const InventoryContext = createContext<InventoryContextValue | null>(null);
@@ -45,6 +50,7 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
   const [stockLines, setStockLines] = useState<StockLine[]>([]);
   const [wasteLines, setWasteLines] = useState<WasteLine[]>([]);
   const [dataLoading, setDataLoading] = useState(false);
+  const isMobileView = useIsMobile();
 
   const refreshCategories = useCallback(async () => {
     const { data } = await supabase.from('inv_categories').select('*').order('name');
@@ -353,15 +359,20 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
       stockLines,
       wasteLines,
       dataLoading,
-      addCategory,
-      deleteCategory,
-      addStockLine,
-      updateStockQuantity,
-      deleteStockLine,
+      addCategory: guardMobile(addCategory, isMobileView),
+      deleteCategory: guardMobile(deleteCategory, isMobileView),
+      addStockLine: guardMobile(addStockLine, isMobileView),
+      updateStockQuantity: guardMobile(updateStockQuantity, isMobileView),
+      deleteStockLine: guardMobile(deleteStockLine, isMobileView),
+      // generatePlan is a pure client-side preview (no DB write), so it's
+      // left unguarded — but the whole Cutting Plan page renders a
+      // desktop-only notice on mobile instead of this tool (see
+      // CuttingPlan.tsx), so it's unreachable from the UI regardless.
       generatePlan,
-      confirmCut,
+      confirmCut: guardMobile(confirmCut, isMobileView),
+      isMobileView,
     }),
-    [categories, stockLines, wasteLines, dataLoading]
+    [categories, stockLines, wasteLines, dataLoading, isMobileView]
   );
 
   return <InventoryContext.Provider value={value}>{children}</InventoryContext.Provider>;

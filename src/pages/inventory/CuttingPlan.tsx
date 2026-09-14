@@ -11,7 +11,6 @@ import {
   type DraftRow,
 } from '../../lib/sheetGrouping';
 import { CuttingTicket } from '../../components/CuttingTicket';
-
 // Persists the in-progress batch entry (and, once generated, the plan
 // itself) across navigation — without this, switching to another page
 // and coming back wiped out everything the person had typed, since it
@@ -163,7 +162,7 @@ function SheetDiagram({ sheet, rows }: { sheet: SheetUsage; rows: DraftRow[] }) 
 }
 
 export default function CuttingPlan() {
-  const { categories, generatePlan, confirmCut } = useInventory();
+  const { categories, generatePlan, confirmCut, isMobileView } = useInventory();
 
   // Read once on mount rather than per-field — five separate
   // sessionStorage reads for one draft object is wasteful, and this way
@@ -274,6 +273,21 @@ export default function CuttingPlan() {
         </div>
       </div>
 
+      {isMobileView ? (
+        <div className="view-body">
+          <div className="panel">
+            <div className="panel-head">
+              <h3>Desktop only</h3>
+            </div>
+            <div style={{ padding: '20px', color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.6 }}>
+              The Cutting Plan tool — entering pieces, generating a layout, and confirming a cut — is only
+              available on a computer. It changes stock and waste records, and the sheet diagrams need more
+              room than a phone screen gives. Open this page on a desktop or laptop to plan and confirm cuts;
+              the Categories &amp; Stock and Waste pages are still fully viewable here.
+            </div>
+          </div>
+        </div>
+      ) : (
       <div className="view-body">
         {error && <div style={{ color: 'var(--danger)', fontSize: 13, marginBottom: 16 }}>{error}</div>}
         {confirmedMessage && <div style={{ color: 'var(--success)', fontSize: 13, marginBottom: 16 }}>{confirmedMessage}</div>}
@@ -505,6 +519,7 @@ export default function CuttingPlan() {
           />
         )}
       </div>
+      )}
     </>
   );
 }

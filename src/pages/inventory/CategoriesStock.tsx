@@ -3,8 +3,17 @@ import { useInventory } from '../../context/InventoryContext';
 import { parseFractionInches, formatFractionInches } from '../../lib/fractionInches';
 
 export default function CategoriesStock() {
-  const { categories, stockLines, dataLoading, addCategory, deleteCategory, addStockLine, updateStockQuantity, deleteStockLine } =
-    useInventory();
+  const {
+    categories,
+    stockLines,
+    dataLoading,
+    addCategory,
+    deleteCategory,
+    addStockLine,
+    updateStockQuantity,
+    deleteStockLine,
+    isMobileView,
+  } = useInventory();
 
   const [newCategoryName, setNewCategoryName] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -89,7 +98,7 @@ export default function CategoriesStock() {
             <div className="panel-head">
               <h3>Categories</h3>
             </div>
-            <form onSubmit={handleAddCategory} style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
+            <form onSubmit={handleAddCategory} className="desktop-only" style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
               <div className="form-field">
                 <label>New category</label>
                 <input
@@ -132,7 +141,7 @@ export default function CategoriesStock() {
                       <tr key={c.id}>
                         <td>{c.name}</td>
                         <td style={{ width: 1, textAlign: 'right' }}>
-                          <button type="button" className="btn btn-ghost btn-small" onClick={() => handleDeleteCategory(c.id)}>
+                          <button type="button" className="btn btn-ghost btn-small desktop-only" onClick={() => handleDeleteCategory(c.id)}>
                             Delete
                           </button>
                         </td>
@@ -150,7 +159,7 @@ export default function CategoriesStock() {
               <h3>Stock on hand</h3>
             </div>
 
-            <form onSubmit={handleAddStock} style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
+            <form onSubmit={handleAddStock} className="desktop-only" style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
               {/* Category gets its own full-width row — category names can
                   run long, and cramming a select in next to three number
                   fields was the main cause of the overflow. */}
@@ -245,26 +254,30 @@ export default function CategoriesStock() {
                         <span className={`badge ${s.origin}`}>{s.origin}</span>
                       </td>
                       <td>
-                        <input
-                          className="num"
-                          type="number"
-                          min={0}
-                          value={s.quantity}
-                          onChange={(e) => {
-                            const q = parseInt(e.target.value, 10);
-                            if (Number.isFinite(q) && q >= 0) updateStockQuantity(s.id, q);
-                          }}
-                          style={{
-                            width: 64,
-                            background: 'var(--surface-2)',
-                            border: '1px solid var(--border)',
-                            borderRadius: 'var(--radius)',
-                            padding: '5px 8px',
-                          }}
-                        />
+                        {isMobileView ? (
+                          <span className="num">{s.quantity}</span>
+                        ) : (
+                          <input
+                            className="num"
+                            type="number"
+                            min={0}
+                            value={s.quantity}
+                            onChange={(e) => {
+                              const q = parseInt(e.target.value, 10);
+                              if (Number.isFinite(q) && q >= 0) updateStockQuantity(s.id, q);
+                            }}
+                            style={{
+                              width: 64,
+                              background: 'var(--surface-2)',
+                              border: '1px solid var(--border)',
+                              borderRadius: 'var(--radius)',
+                              padding: '5px 8px',
+                            }}
+                          />
+                        )}
                       </td>
                       <td style={{ width: 1, textAlign: 'right' }}>
-                        <button type="button" className="btn btn-ghost btn-small" onClick={() => deleteStockLine(s.id)}>
+                        <button type="button" className="btn btn-ghost btn-small desktop-only" onClick={() => deleteStockLine(s.id)}>
                           Remove
                         </button>
                       </td>

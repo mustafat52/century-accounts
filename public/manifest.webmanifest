@@ -1,0 +1,16 @@
+{
+  "name": "Century Glass Art — Accounts & Billing",
+  "short_name": "CGA Accounts",
+  "description": "Century Glass Art's accounts, billing, and inventory system. View-only on phones and tablets — full add/edit access is on a computer.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#14161c",
+  "theme_color": "#14161c",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
