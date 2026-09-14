@@ -72,6 +72,21 @@ h1, h2, h3 { font-family: var(--font-display); margin: 0; font-weight: 500; }
   min-height: 100vh;
 }
 
+/* Every direct child of a grid/flex container defaults to a "won't shrink
+   below its own content's natural width" minimum size — that's what was
+   actually forcing the mobile layout wide (.mobile-nav is a sibling grid
+   item of .main here, not nested inside it, so .main's own min-width: 0
+   below never reached it). overflow-x: hidden on html/body (further down
+   this file) only clips the resulting overflow — it doesn't stop the
+   content from *being* oversized in the first place, so on its own it
+   just turns "scrollable but ugly" into "silently clipped and mostly
+   unreachable." This is the actual fix: let every direct child of .app
+   and .main shrink to fit the track/container they're actually given,
+   so .view-body's own children (stat-grid, tables, etc. — all plain
+   block-level boxes, not flex/grid items) correctly measure themselves
+   against the real, viewport-sized width instead of an inflated one. */
+.app > * { min-width: 0; }
+
 .sidebar {
   background: var(--surface);
   border-right: 1px solid var(--border);
@@ -183,6 +198,12 @@ h1, h2, h3 { font-family: var(--font-display); margin: 0; font-weight: 500; }
 .build-tag { font-size: 11px; color: var(--text-muted); letter-spacing: 0.03em; }
 
 .main { display: flex; flex-direction: column; min-width: 0; }
+/* Same reasoning as .app > * above, one level down — .main's own
+   min-width: 0 only affects how .main itself behaves as a grid item;
+   it doesn't propagate to .main's own children (.topbar, .view-body,
+   whatever each page renders), which is what was actually holding the
+   page content itself at an oversized natural width. */
+.main > * { min-width: 0; }
 
 .topbar {
   display: flex;
@@ -448,7 +469,7 @@ tbody tr:hover { background: var(--surface-2); }
 .search-input:focus { outline: none; border-color: var(--gold); }
 .search-input::placeholder { color: var(--text-muted); }
 
-.chip-row { display: flex; gap: 8px; margin-bottom: 16px; }
+.chip-row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
 .chip {
   padding: 6px 14px;
   border-radius: 20px;
@@ -693,11 +714,12 @@ tbody tr:hover { background: var(--surface-2); }
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 10px;
     padding: 0 14px 10px;
   }
 
-  .mobile-nav-foot .mobile-nav-banner { padding: 0; flex: 1; }
+  .mobile-nav-foot .mobile-nav-banner { padding: 0; flex: 1; min-width: 180px; }
 
   .mobile-nav-logout {
     flex: 0 0 auto;
