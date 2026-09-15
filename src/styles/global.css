@@ -661,7 +661,19 @@ tbody tr:hover { background: var(--surface-2); }
 .mobile-nav { display: none; }
 
 @media (max-width: 860px) {
-  .app { grid-template-columns: 1fr; }
+  .app {
+    grid-template-columns: 1fr;
+    /* Grid rows default to align-items: stretch, and .app has
+       min-height: 100vh for desktop's full-height sidebar background —
+       on a page whose content doesn't fill the screen (Links, Vendors,
+       Purchase Bills with few rows), that stretch was being applied to
+       EVERY row track, including .mobile-nav's own row, padding blank
+       space in right after the banner/logout line rather than at the
+       bottom of the page where it belongs. Desktop still wants the
+       stretch (that's what makes .sidebar's background reach the full
+       viewport height), so this is mobile-only. */
+    align-items: start;
+  }
   .sidebar { display: none; }
   .two-col { grid-template-columns: 1fr; }
 
