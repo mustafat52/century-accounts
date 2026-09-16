@@ -179,6 +179,12 @@ export default function CuttingPlan() {
   const [confirmedMessage, setConfirmedMessage] = useState('');
   const [activeGroupIndex, setActiveGroupIndex] = useState(0);
   const [isTicketOpen, setIsTicketOpen] = useState(false);
+  // Distinguishes "opened via the manual Print button, before confirming"
+  // (plan/planRows must stay alive when this closes — nothing is
+  // committed yet, the person is still mid-workflow) from "opened
+  // automatically right after Confirm & Cut succeeded" (the job is done,
+  // so plan/planRows should clear once the ticket is closed).
+  const [ticketOpenedAfterConfirm, setTicketOpenedAfterConfirm] = useState(false);
 
   // Persist on every change to categoryId/rows/plan/planRows/confirmedItems
   // — this is what actually fixes the bug: without it, navigating away
@@ -243,11 +249,17 @@ export default function CuttingPlan() {
       setConfirmedMessage(
         `Cut confirmed: ${plan.sheets.length} sheet${plan.sheets.length === 1 ? '' : 's'} used, stock updated.`
       );
-      setPlan(null);
-      setPlanRows([]);
       setConfirmedItems(null);
       setRows([newDraftRow()]);
       clearDraft();
+      // plan/planRows stay alive on purpose — the ticket needs them to
+      // render. Confirming the cut is the more common "I'm done" moment
+      // than remembering to separately click Print, so this surfaces the
+      // printable ticket automatically instead of requiring a second,
+      // easy-to-forget click. Closing the ticket (see onClose below) is
+      // what actually clears plan/planRows once the person is done.
+      setTicketOpenedAfterConfirm(true);
+      setIsTicketOpen(true);
     } catch (err) {
       // An unexpected throw here (as opposed to confirmCut resolving to
       // false) still needs to surface as an error rather than silently
@@ -495,14 +507,24 @@ export default function CuttingPlan() {
                 )}
 
                 <div style={{ padding: '0 20px 20px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-                  <button type="button" className="btn btn-ghost" onClick={() => setIsTicketOpen(true)}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => {
+                      // Manual, pre-confirm preview — make sure closing it
+                      // doesn't trigger the post-confirm cleanup below.
+                      setTicketOpenedAfterConfirm(false);
+                      setIsTicketOpen(true);
+                    }}
+                  >
                     Print Cutting Ticket
                   </button>
                   <button type="button" className="btn btn-primary" onClick={handleConfirmCut} disabled={confirming}>
                     {confirming ? 'Confirming…' : `Confirm & Cut — ${plan.sheets.length} sheet${plan.sheets.length === 1 ? '' : 's'}`}
                   </button>
                   <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-                    Print the ticket to hand to the cutter before or after confirming — deducting stock is separate.
+                    Print now if the cutter needs it in hand first — Confirm &amp; Cut will open a printable ticket
+                    automatically once the cut is done.
                   </span>
                 </div>
               </div>
@@ -515,7 +537,18 @@ export default function CuttingPlan() {
             plan={plan}
             rows={planRows}
             categoryName={categories.find((c) => c.id === categoryId)?.name ?? ''}
-            onClose={() => setIsTicketOpen(false)}
+            onClose={() => {
+              setIsTicketOpen(false);
+              if (ticketOpenedAfterConfirm) {
+                // The deferred cleanup from handleConfirmCut — the job was
+                // already committed, this ticket was just the printable
+                // record of it, so there's nothing left to hold onto now
+                // that it's closed.
+                setPlan(null);
+                setPlanRows([]);
+                setTicketOpenedAfterConfirm(false);
+              }
+            }}
           />
         )}
       </div>

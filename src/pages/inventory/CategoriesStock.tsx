@@ -1,6 +1,79 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useInventory } from '../../context/InventoryContext';
 import { parseFractionInches, formatFractionInches } from '../../lib/fractionInches';
+import type { StockLine } from '../../inventoryTypes';
+
+// The quantity field used to fire a database write on every keystroke —
+// typing "150" fired three separate writes (for "1", then "15", then
+// "150"), and if someone got interrupted or mistyped partway through,
+// whatever half-finished number was on screen at that moment was already
+// saved as the real stock count. This fixes both problems: the value only
+// commits on blur or Enter (never mid-keystroke), and any REDUCTION
+// specifically asks for confirmation first — going up is low-risk (worst
+// case, add a correcting line later), but silently wiping out real stock
+// on a typo is the direction actually worth guarding.
+function StockQuantityCell({
+  stockLine,
+  onCommit,
+}: {
+  stockLine: StockLine;
+  onCommit: (id: string, quantity: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(stockLine.quantity));
+
+  // Keep the draft in sync if the real value changes from elsewhere
+  // (another tab, a cutting job consuming this stock line, etc.) —
+  // without this, a stale draft could silently overwrite a newer value
+  // the next time this cell commits.
+  useEffect(() => {
+    setDraft(String(stockLine.quantity));
+  }, [stockLine.quantity]);
+
+  function commit() {
+    const q = parseInt(draft, 10);
+    if (!Number.isFinite(q) || q < 0) {
+      setDraft(String(stockLine.quantity)); // invalid entry — revert, don't write
+      return;
+    }
+    if (q === stockLine.quantity) return; // no actual change, nothing to do
+
+    if (q < stockLine.quantity) {
+      const ok = confirm(
+        `Reduce ${stockLine.categoryName} ${formatFractionInches(stockLine.lengthIn)} × ${formatFractionInches(
+          stockLine.widthIn
+        )} from ${stockLine.quantity} to ${q}?`
+      );
+      if (!ok) {
+        setDraft(String(stockLine.quantity));
+        return;
+      }
+    }
+
+    onCommit(stockLine.id, q);
+  }
+
+  return (
+    <input
+      className="num"
+      type="number"
+      min={0}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); // blur triggers commit()
+        if (e.key === 'Escape') setDraft(String(stockLine.quantity));
+      }}
+      style={{
+        width: 64,
+        background: 'var(--surface-2)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius)',
+        padding: '5px 8px',
+      }}
+    />
+  );
+}
 
 export default function CategoriesStock() {
   const {
@@ -257,23 +330,7 @@ export default function CategoriesStock() {
                         {isMobileView ? (
                           <span className="num">{s.quantity}</span>
                         ) : (
-                          <input
-                            className="num"
-                            type="number"
-                            min={0}
-                            value={s.quantity}
-                            onChange={(e) => {
-                              const q = parseInt(e.target.value, 10);
-                              if (Number.isFinite(q) && q >= 0) updateStockQuantity(s.id, q);
-                            }}
-                            style={{
-                              width: 64,
-                              background: 'var(--surface-2)',
-                              border: '1px solid var(--border)',
-                              borderRadius: 'var(--radius)',
-                              padding: '5px 8px',
-                            }}
-                          />
+                          <StockQuantityCell stockLine={s} onCommit={updateStockQuantity} />
                         )}
                       </td>
                       <td style={{ width: 1, textAlign: 'right' }}>
