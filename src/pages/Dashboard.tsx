@@ -130,15 +130,15 @@ export default function Dashboard() {
               <h3>Needs attention</h3>
             </div>
             <div className="table-scroll">
-              <table>
+              <table className="table-cards">
               <tbody>
                 {overdueQuotations.map((q) => (
                   <tr key={q.id}>
-                    <td>
+                    <td className="card-main">
                       <div className="row-name">{customerName(q.customerId)}</div>
                       <div className="row-sub">{q.id} · due {dueDateFor(q.date)}</div>
                     </td>
-                    <td className="num">{formatINR(q.balanceAmount)}</td>
+                    <td className="num card-amount">{formatINR(q.balanceAmount)}</td>
                   </tr>
                 ))}
                 {overdueQuotations.length === 0 && (
@@ -157,7 +157,7 @@ export default function Dashboard() {
             <h3>Recent invoices</h3>
           </div>
           <div className="table-scroll">
-            <table>
+            <table className="table-cards">
             <thead>
               <tr>
                 <th>Invoice</th>
@@ -170,11 +170,11 @@ export default function Dashboard() {
             <tbody>
               {recent.map((i) => (
                 <tr key={i.id}>
-                  <td>{i.id}</td>
-                  <td>{customerName(i.customerId)}</td>
-                  <td className="row-sub">{i.description}</td>
-                  <td className="num">{formatINR(i.amount - i.discountAmount + i.gst + i.transportation)}</td>
-                  <td>
+                  <td className="card-tag">{i.id}</td>
+                  <td className="card-tag-muted">{customerName(i.customerId)}</td>
+                  <td className="row-sub card-line">{i.description}</td>
+                  <td className="num card-amount">{formatINR(i.amount - i.discountAmount + i.gst + i.transportation)}</td>
+                  <td className="card-badge-right">
                     <StatusBadge status="converted" />
                   </td>
                 </tr>

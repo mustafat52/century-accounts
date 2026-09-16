@@ -234,7 +234,8 @@ export default function Expenses() {
               </button>
             </div>
           </div>
-          <table>
+          <div className="table-scroll">
+          <table className="table-cards">
             <thead>
               <tr>
                 <th>Date</th>
@@ -251,20 +252,28 @@ export default function Expenses() {
               )}
               {expenses.map((e) => (
                 <tr key={e.id}>
-                  <td className="row-sub">{e.date}</td>
-                  <td className="row-sub">{e.category}</td>
-                  <td>{e.description}</td>
-                  <td className="num">{formatINR(e.amount)}</td>
+                  <td className="card-main">{e.description}</td>
+                  <td className="num card-amount">{formatINR(e.amount)}</td>
+                  <td className="row-sub card-meta">
+                    <span className="mobile-label">Date</span>
+                    {e.date}
+                  </td>
+                  <td className="row-sub card-meta">
+                    <span className="mobile-label">Category</span>
+                    {e.category}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
 
         <div className="panel">
           <div className="panel-head">
             <h3>By category</h3>
           </div>
+          <div className="table-scroll">
           <table>
             <tbody>
               {byCategory.map(([cat, amount]) => (
@@ -275,6 +284,7 @@ export default function Expenses() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
 
         <div className="panel">
@@ -292,7 +302,8 @@ export default function Expenses() {
               </button>
             </div>
           </div>
-          <table>
+          <div className="table-scroll">
+          <table className="table-cards">
             <thead>
               <tr>
                 <th>Worker</th>
@@ -309,18 +320,23 @@ export default function Expenses() {
               )}
               {workers.map((w) => (
                 <tr key={w.id} onClick={() => setSelectedWorkerId(w.id)} style={{ cursor: 'pointer' }}>
-                  <td className="row-name">{w.name}</td>
-                  <td className="num">{formatINR(w.monthlySalary)}</td>
-                  <td className="num" style={{ color: w.advancesThisMonth > 0 ? 'var(--warning)' : undefined }}>
+                  <td className="row-name card-main">{w.name}</td>
+                  <td className="num card-meta">
+                    <span className="mobile-label">Salary</span>
+                    {formatINR(w.monthlySalary)}
+                  </td>
+                  <td className="num card-hide" style={{ color: w.advancesThisMonth > 0 ? 'var(--warning)' : undefined }}>
                     {formatINR(w.advancesThisMonth)}
                   </td>
-                  <td className="num" style={{ color: w.remainingThisMonth > 0 ? 'var(--success)' : 'var(--text-muted)' }}>
+                  <td className="num card-amount" style={{ color: w.remainingThisMonth > 0 ? 'var(--success)' : 'var(--text-muted)' }}>
+                    <span className="mobile-label">Remaining</span>
                     {formatINR(w.remainingThisMonth)}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
 

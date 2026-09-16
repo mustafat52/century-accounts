@@ -660,6 +660,12 @@ tbody tr:hover { background: var(--surface-2); }
 
 .mobile-nav { display: none; }
 
+/* Base state for inline column labels used by .table-cards below — the
+   media query further down flips these visible. Defined here (outside
+   the media query) so the "hidden by default" half of the toggle is in
+   one obvious place. */
+.mobile-label { display: none; }
+
 @media (max-width: 860px) {
   .app {
     grid-template-columns: 1fr;
@@ -759,6 +765,80 @@ tbody tr:hover { background: var(--surface-2); }
      to track each one down individually. */
   input, select, textarea { font-size: 16px; }
   .form-field input, .form-field select { font-size: 16px; }
+
+  /* ---------- Responsive "card" tables ----------
+     Opt-in via .table-cards on the <table> itself — Reports and the
+     inventory grids are deliberately left as contained horizontal
+     scroll instead (see .table-scroll above): those are dense numeric
+     comparisons where seeing values side by side actually matters, these
+     are "browse and find a record" tables where a card per row reads
+     faster on a phone than a cropped, scrolling grid. Each <tr> becomes
+     a flex-wrap card; individual <td>s opt into a role (card-main,
+     card-tag, etc. below) that controls where they land in it. A <td>
+     with no role class just falls back to a plain full-width line,
+     which is a safe default rather than a broken one. */
+  .table-cards thead { display: none; }
+  .table-cards tbody { display: block; }
+  .table-cards tbody tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 4px 10px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .table-cards tbody tr:last-child { margin-bottom: 0; }
+  .table-cards td { border-bottom: none; padding: 0; flex: 1 1 100%; order: 5; }
+
+  /* Inline label reprinting a column's now-hidden <th> text, e.g.
+     "Active quoted" before a bare number. */
+  .table-cards .mobile-label {
+    display: inline;
+    color: var(--text-muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    margin-right: 4px;
+  }
+
+  /* A cell that's already its own multi-line block (name + subtext,
+     invoice no. + date) — sits alone on the top line of the card. */
+  .table-cards .card-main { order: 1; flex: 1 1 100%; }
+  /* Two short values meant to read as one line, e.g. "INV-042 — Ali
+     Bhai" — card-tag first, card-tag-muted immediately after it. */
+  .table-cards .card-tag { order: 1; flex: 0 0 auto; font-weight: 600; }
+  .table-cards .card-tag-muted { order: 2; flex: 0 0 auto; color: var(--text-muted); font-size: 12px; }
+  .table-cards .card-tag-muted::before { content: '— '; }
+  /* A secondary inline value, left-aligned, usually paired with a
+     card-amount on the same line via the amount's own right-push. */
+  .table-cards .card-meta { order: 2; flex: 0 0 auto; color: var(--text-muted); font-size: 12px; }
+  /* The prominent number — pushes itself (and anything after it on the
+     same line) to the right edge via margin-left: auto. */
+  .table-cards .card-amount {
+    order: 3;
+    flex: 0 0 auto;
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    text-align: right;
+  }
+  /* A full-width supporting line below the top row — description,
+     GSTIN, etc. Multiple card-lines keep their JSX order among
+     themselves since they share one order value. */
+  .table-cards .card-line { order: 5; flex: 1 1 100%; }
+  /* A status badge alone, right-aligned on its own line. */
+  .table-cards .card-badge-right { order: 6; flex: 1 1 100%; text-align: right; }
+  /* The trailing actions cell — full-width row of buttons at the
+     bottom of the card, wrapping like it already does on desktop. */
+  .table-cards .card-actions { order: 9; flex: 1 1 100%; margin-top: 10px; }
+  /* Column dropped entirely on mobile — used for lower-priority detail
+     that's still one tap away (row opens a detail view) rather than
+     cluttering the card. */
+  .table-cards .card-hide { display: none; }
 }
 
 /* ---------- Welcome overlay (post-login) ---------- */

@@ -31,7 +31,7 @@ export default function PurchaseBills() {
             </button>
           </div>
           <div className="table-scroll">
-          <table>
+          <table className="table-cards">
             <thead>
               <tr>
                 <th>Invoice</th>
@@ -49,21 +49,24 @@ export default function PurchaseBills() {
                 return (
                   <Fragment key={b.id}>
                     <tr>
-                      <td>
+                      <td className="card-main">
                         <div className="row-name">{b.invoiceNo}</div>
                         <div className="row-sub">{b.invoiceDate}</div>
                       </td>
-                      <td>{b.supplierName}</td>
-                      <td className="row-sub">{b.supplierGstin}</td>
-                      <td className="row-sub">{b.placeOfSupply}</td>
-                      <td className="row-sub">{b.taxType === 'cgst_sgst' ? 'CGST+SGST' : 'IGST'}</td>
-                      <td className="num">
+                      <td className="card-meta">{b.supplierName}</td>
+                      <td className="row-sub card-line">
+                        <span className="mobile-label">GSTIN</span>
+                        {b.supplierGstin}
+                      </td>
+                      <td className="row-sub card-hide">{b.placeOfSupply}</td>
+                      <td className="row-sub card-hide">{b.taxType === 'cgst_sgst' ? 'CGST+SGST' : 'IGST'}</td>
+                      <td className="num card-amount">
                         {formatINR(b.totalAmount)}
                         <div className="row-sub">
                           Taxable {formatINR(b.subtotal)}
                         </div>
                       </td>
-                      <td>
+                      <td className="card-actions">
                         <button className="btn btn-ghost btn-small" onClick={() => setExpandedId(isExpanded ? null : b.id)}>
                           {isExpanded ? 'Hide items' : 'View items'}
                         </button>

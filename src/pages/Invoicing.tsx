@@ -133,7 +133,7 @@ export default function Invoicing() {
                 </h3>
               </div>
               <div className="table-scroll">
-                <table>
+                <table className="table-cards">
                 <thead>
                   <tr>
                     <th>Quotation</th>
@@ -152,10 +152,9 @@ export default function Invoicing() {
                   )}
                   {filteredQuotations.map((q) => (
                     <tr key={q.id}>
-                      <td>{q.id}</td>
-                      <td>{customerName(q.customerId)}</td>
-                      <td className="row-sub">{q.description}</td>
-                      <td className="num">
+                      <td className="card-tag">{q.id}</td>
+                      <td className="card-tag-muted">{customerName(q.customerId)}</td>
+                      <td className="num card-amount">
                         {formatINR(q.grandTotal)}
                         {q.discountAmount > 0 && (
                           <div className="row-sub">
@@ -168,10 +167,11 @@ export default function Invoicing() {
                           <div className="row-sub">Paid {formatINR(q.paidAmount)} · Bal {formatINR(q.balanceAmount)}</div>
                         )}
                       </td>
-                      <td>
+                      <td className="row-sub card-line">{q.description}</td>
+                      <td className="card-badge-right">
                         <StatusBadge status={q.effectiveStatus} showPartial={q.paidAmount > 0 && q.balanceAmount > 0} />
                       </td>
-                      <td>
+                      <td className="card-actions">
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <button className="btn btn-ghost btn-small" onClick={() => openPrint('quotation', q.id)}>
                           Quotation
@@ -227,7 +227,7 @@ export default function Invoicing() {
               </h3>
             </div>
             <div className="table-scroll">
-              <table>
+              <table className="table-cards">
               <thead>
                 <tr>
                   <th>Invoice</th>
@@ -246,13 +246,9 @@ export default function Invoicing() {
                 )}
                 {sortedInvoices.map((i) => (
                   <tr key={i.id}>
-                    <td>{i.id}</td>
-                    <td>{customerName(i.customerId)}</td>
-                    <td className="row-sub">
-                      {i.description}
-                      {i.items.length > 1 && <div className="row-sub">{i.items.length} items</div>}
-                    </td>
-                    <td className="num">
+                    <td className="card-tag">{i.id}</td>
+                    <td className="card-tag-muted">{customerName(i.customerId)}</td>
+                    <td className="num card-amount">
                       {formatINR(i.amount - i.discountAmount + i.gst + i.transportation)}
                       {i.gst > 0 && (
                         <div className="row-sub">
@@ -261,8 +257,15 @@ export default function Invoicing() {
                       )}
                       {i.transportation > 0 && <div className="row-sub">+ Transport {formatINR(i.transportation)}</div>}
                     </td>
-                    <td className="row-sub">{i.date}</td>
-                    <td>
+                    <td className="row-sub card-line">
+                      {i.description}
+                      {i.items.length > 1 && <div className="row-sub">{i.items.length} items</div>}
+                    </td>
+                    <td className="row-sub card-meta">
+                      <span className="mobile-label">Date</span>
+                      {i.date}
+                    </td>
+                    <td className="card-actions">
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <button className="btn btn-ghost btn-small" onClick={() => openPrint('invoice', i.id)}>
                         Print

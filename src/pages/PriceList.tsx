@@ -48,7 +48,7 @@ export default function PriceList() {
             </button>
           </div>
           <div className="table-scroll">
-            <table>
+            <table className="table-cards">
             <thead>
               <tr>
                 <th>Description</th>
@@ -61,11 +61,20 @@ export default function PriceList() {
             <tbody>
               {priceList.map((item) => (
                 <tr key={item.id}>
-                  <td>{item.description}</td>
-                  <td className="num">{formatINR(item.ratePerSft)}</td>
-                  <td className="num">{formatINR(item.polishRate)}</td>
-                  <td className="num">{formatINR(item.fixingRate)}</td>
-                  <td>
+                  <td className="card-main">{item.description}</td>
+                  <td className="num card-meta">
+                    <span className="mobile-label">Rate/Sft</span>
+                    {formatINR(item.ratePerSft)}
+                  </td>
+                  <td className="num card-meta">
+                    <span className="mobile-label">Polish</span>
+                    {formatINR(item.polishRate)}
+                  </td>
+                  <td className="num card-meta">
+                    <span className="mobile-label">Fixing</span>
+                    {formatINR(item.fixingRate)}
+                  </td>
+                  <td className="card-actions">
                     <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                       <button className="btn btn-ghost btn-small desktop-only" onClick={() => openEdit(item)}>Edit</button>
                       <button className="btn btn-ghost btn-small desktop-only" onClick={() => setDeleteTarget(item)}>Delete</button>

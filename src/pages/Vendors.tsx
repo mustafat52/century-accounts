@@ -144,7 +144,7 @@ export default function Vendors() {
               </div>
             </div>
             <div className="table-scroll">
-              <table>
+              <table className="table-cards">
               <thead>
                 <tr>
                   <th>Date</th>
@@ -159,8 +159,7 @@ export default function Vendors() {
               <tbody>
                 {history.map((row) => (
                   <tr key={row.key}>
-                    <td className="row-sub">{row.date}</td>
-                    <td>
+                    <td className="card-main">
                       {row.dcNo ? (
                         <>
                           <div className="row-name">{row.dcNo}</div>
@@ -170,9 +169,16 @@ export default function Vendors() {
                         <span className="row-sub">—</span>
                       )}
                     </td>
-                    <td className="row-sub">{row.customerName || '—'}</td>
-                    <td className="row-sub">{row.category}</td>
-                    <td className="num">
+                    <td className="row-sub card-meta">
+                      <span className="mobile-label">Date</span>
+                      {row.date}
+                    </td>
+                    <td className="row-sub card-meta">
+                      <span className="mobile-label">Customer</span>
+                      {row.customerName || '—'}
+                    </td>
+                    <td className="row-sub card-hide">{row.category}</td>
+                    <td className="num card-amount">
                       {row.purchase ? (
                         <>
                           {formatINR(row.purchase.amount)}
@@ -186,7 +192,7 @@ export default function Vendors() {
                         <span className="row-sub">Awaiting prices</span>
                       )}
                     </td>
-                    <td>
+                    <td className="card-badge-right">
                       {row.purchase ? (
                         <span
                           className={`badge ${
@@ -207,7 +213,7 @@ export default function Vendors() {
                         <span className="badge due">Pending Pricing</span>
                       )}
                     </td>
-                    <td>
+                    <td className="card-actions">
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       {row.pendingSlip && (
                         <>
@@ -310,7 +316,7 @@ export default function Vendors() {
             </div>
           </div>
           <div className="table-scroll">
-            <table>
+            <table className="table-cards">
             <thead>
               <tr>
                 <th>Vendor</th>
@@ -329,13 +335,20 @@ export default function Vendors() {
               )}
               {filteredVendors.map((v) => (
                 <tr key={v.id} onClick={() => setSelectedVendorId(v.id)} style={{ cursor: 'pointer' }}>
-                  <td>
+                  <td className="card-main">
                     <div className="row-name">{v.name}</div>
                     <div className="row-sub">{v.contact}</div>
                   </td>
-                  <td className="row-sub">{v.category}</td>
-                  <td className="num">{formatINR(v.totalPurchased)}</td>
-                  <td className="num" style={{ color: v.payable > 0 ? 'var(--warning)' : 'var(--success)' }}>
+                  <td className="row-sub card-meta">
+                    <span className="mobile-label">Category</span>
+                    {v.category}
+                  </td>
+                  <td className="num card-meta">
+                    <span className="mobile-label">Total purchased</span>
+                    {formatINR(v.totalPurchased)}
+                  </td>
+                  <td className="num card-amount" style={{ color: v.payable > 0 ? 'var(--warning)' : 'var(--success)' }}>
+                    <span className="mobile-label">Payable</span>
                     {v.payable > 0 ? formatINR(v.payable) : 'Settled'}
                   </td>
                 </tr>

@@ -239,7 +239,7 @@ export default function Customers() {
               </button>
             </div>
           </div>
-          <table>
+          <table className="table-cards">
             <thead>
               <tr>
                 <th>Name</th>
@@ -257,12 +257,16 @@ export default function Customers() {
               )}
               {filteredCustomers.map((c) => (
                 <tr key={c.id} onClick={() => setSelectedId(c.id)} style={{ cursor: 'pointer' }}>
-                  <td>
+                  <td className="card-main">
                     <div className="row-name">{c.name}</div>
                     <div className="row-sub">{c.contact}</div>
                   </td>
-                  <td className="num">{formatINR(c.totalBilled)}</td>
-                  <td className="num" style={{ color: c.outstanding > 0 ? 'var(--warning)' : 'var(--success)' }}>
+                  <td className="num card-meta">
+                    <span className="mobile-label">Active quoted</span>
+                    {formatINR(c.totalBilled)}
+                  </td>
+                  <td className="num card-amount" style={{ color: c.outstanding > 0 ? 'var(--warning)' : 'var(--success)' }}>
+                    <span className="mobile-label">Outstanding</span>
                     {c.outstanding > 0 ? formatINR(c.outstanding) : 'Settled'}
                   </td>
                 </tr>
