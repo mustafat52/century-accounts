@@ -34,7 +34,8 @@ export default function InventoryMobileNav() {
       </div>
       <div className="mobile-nav-foot">
         <span className="mobile-nav-banner">
-          View only on mobile — Categories &amp; Stock and Waste can be viewed here; the Cutting Plan tool needs a computer.
+          View only on mobile — Categories &amp; Stock, Waste, and Cutting History can be viewed here; the Cutting
+          Plan tool needs a computer.
         </span>
         <button type="button" className="mobile-nav-logout" onClick={handleLogout}>
           Sign out

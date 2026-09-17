@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useInventory } from '../../context/InventoryContext';
 import { parseFractionInches, formatFractionInches } from '../../lib/fractionInches';
-import type { StockLine } from '../../inventoryTypes';
+import type { StockCategory, StockLine } from '../../inventoryTypes';
 
 // The quantity field used to fire a database write on every keystroke —
 // typing "150" fired three separate writes (for "1", then "15", then
@@ -75,12 +75,90 @@ function StockQuantityCell({
   );
 }
 
+// Category names could previously only be set at creation — fixing a
+// typo meant deleting and recreating the category, which also requires
+// it to have zero stock lines first. This gives it the same
+// click-to-edit, commit-on-blur-or-Enter treatment as StockQuantityCell
+// above, just for a name instead of a number.
+function CategoryNameCell({
+  category,
+  onCommit,
+}: {
+  category: StockCategory;
+  onCommit: (id: string, name: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(category.name);
+
+  useEffect(() => {
+    setDraft(category.name);
+  }, [category.name]);
+
+  function commit() {
+    setEditing(false);
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === category.name) {
+      setDraft(category.name); // no real change, or emptied out — revert
+      return;
+    }
+    onCommit(category.id, trimmed);
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        title="Click to rename"
+        style={{
+          background: 'none',
+          border: 'none',
+          padding: 0,
+          font: 'inherit',
+          color: 'inherit',
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        {category.name}
+      </button>
+    );
+  }
+
+  return (
+    <input
+      autoFocus
+      type="text"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); // blur triggers commit()
+        if (e.key === 'Escape') {
+          setDraft(category.name);
+          setEditing(false);
+        }
+      }}
+      style={{
+        width: '100%',
+        background: 'var(--surface-2)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius)',
+        padding: '4px 8px',
+        font: 'inherit',
+        color: 'inherit',
+      }}
+    />
+  );
+}
+
 export default function CategoriesStock() {
   const {
     categories,
     stockLines,
     dataLoading,
     addCategory,
+    updateCategory,
     deleteCategory,
     addStockLine,
     updateStockQuantity,
@@ -115,10 +193,30 @@ export default function CategoriesStock() {
     setFormError('');
   }
 
+  async function handleRenameCategory(id: string, name: string) {
+    const ok = await updateCategory(id, name);
+    if (!ok) setFormError('Could not rename category — name may already be in use.');
+  }
+
   async function handleDeleteCategory(id: string) {
     if (!confirm('Delete this category? It must have no stock lines first.')) return;
     const ok = await deleteCategory(id);
     if (!ok) setFormError('Could not delete category — it still has stock lines referencing it.');
+  }
+
+  async function handleDeleteStock(s: (typeof stockLines)[number]) {
+    // Removing a stock line is as destructive as a quantity reduction to
+    // zero (arguably more so — it also drops the size/origin record, not
+    // just the count), so it gets the same explicit-confirmation
+    // treatment as StockQuantityCell's reduce path, naming exactly what's
+    // about to disappear.
+    const ok = confirm(
+      `Remove this stock line entirely — ${s.categoryName} ${formatFractionInches(s.lengthIn)} × ${formatFractionInches(
+        s.widthIn
+      )}, qty ${s.quantity}? This can't be undone.`
+    );
+    if (!ok) return;
+    await deleteStockLine(s.id);
   }
 
   async function handleAddStock(e: FormEvent) {
@@ -132,6 +230,36 @@ export default function CategoriesStock() {
     if (!stockCategoryId) return setFormError('Choose a category.');
     if (length === null || width === null) return setFormError('Enter sizes like 72, 21 5/8, or 21⅝.');
     if (!Number.isFinite(quantity) || quantity < 0) return setFormError('Quantity must be zero or more.');
+
+    // Adding a size that's already sitting in stock used to always create
+    // a second row for the same category/size — fine if it's genuinely a
+    // separate batch, but usually just a papercut (e.g. a new delivery of
+    // a size already stocked). Only matches 'fresh' stock — a waste-origin
+    // remnant that happens to be the same size is a different kind of
+    // thing and shouldn't get folded into it silently.
+    const existing = stockLines.find(
+      (s) => s.categoryId === stockCategoryId && s.origin === 'fresh' && s.lengthIn === length && s.widthIn === width
+    );
+
+    if (existing) {
+      const combined = existing.quantity + quantity;
+      const categoryName = categories.find((c) => c.id === stockCategoryId)?.name ?? 'this category';
+      const mergeInstead = confirm(
+        `${categoryName} ${formatFractionInches(length)} × ${formatFractionInches(existing.widthIn)} already has ${
+          existing.quantity
+        } in stock. Add ${quantity} more to make ${combined}?\n\nCancel to add this as a separate line instead.`
+      );
+      if (mergeInstead) {
+        setSubmitting(true);
+        await updateStockQuantity(existing.id, combined);
+        setSubmitting(false);
+        setLengthRaw('');
+        setWidthRaw('');
+        setQuantityRaw('1');
+        return;
+      }
+      // else fall through — add as a genuinely separate line, as before
+    }
 
     setSubmitting(true);
     const created = await addStockLine({ categoryId: stockCategoryId, lengthIn: length, widthIn: width, quantity });
@@ -212,7 +340,13 @@ export default function CategoriesStock() {
                   <tbody>
                     {categories.map((c) => (
                       <tr key={c.id}>
-                        <td>{c.name}</td>
+                        <td>
+                          {isMobileView ? (
+                            c.name
+                          ) : (
+                            <CategoryNameCell category={c} onCommit={handleRenameCategory} />
+                          )}
+                        </td>
                         <td style={{ width: 1, textAlign: 'right' }}>
                           <button type="button" className="btn btn-ghost btn-small desktop-only" onClick={() => handleDeleteCategory(c.id)}>
                             Delete
@@ -334,7 +468,7 @@ export default function CategoriesStock() {
                         )}
                       </td>
                       <td style={{ width: 1, textAlign: 'right' }}>
-                        <button type="button" className="btn btn-ghost btn-small desktop-only" onClick={() => deleteStockLine(s.id)}>
+                        <button type="button" className="btn btn-ghost btn-small desktop-only" onClick={() => handleDeleteStock(s)}>
                           Remove
                         </button>
                       </td>

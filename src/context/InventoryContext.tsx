@@ -20,10 +20,16 @@ interface InventoryContextValue {
   wasteLines: WasteLine[];
   dataLoading: boolean;
 
-  addCategory: (input: NewStockCategoryInput) => Promise<StockCategory | null>;
-  deleteCategory: (id: string) => Promise<boolean>;
+  // Return types include `| undefined` (addCategory/deleteCategory/
+  // addStockLine/confirmCut) to reflect what guardMobile actually does
+  // on a blocked mobile call — see mobileGuard.ts. updateStockQuantity
+  // and deleteStockLine resolve to void either way, so no change needed
+  // there: undefined is already assignable to void.
+  addCategory: (input: NewStockCategoryInput) => Promise<StockCategory | null | undefined>;
+  updateCategory: (id: string, name: string) => Promise<boolean | undefined>;
+  deleteCategory: (id: string) => Promise<boolean | undefined>;
 
-  addStockLine: (input: NewStockLineInput) => Promise<StockLine | null>;
+  addStockLine: (input: NewStockLineInput) => Promise<StockLine | null | undefined>;
   updateStockQuantity: (id: string, quantity: number) => Promise<void>;
   deleteStockLine: (id: string) => Promise<void>;
 
@@ -33,7 +39,7 @@ interface InventoryContextValue {
   // the database. confirmCut is the only action that mutates data, per
   // the plan/commit split in the spec.
   generatePlan: (categoryId: string, items: CuttingJobItemInput[]) => PlanResult;
-  confirmCut: (categoryId: string, items: CuttingJobItemInput[], plan: PlanResult) => Promise<boolean>;
+  confirmCut: (categoryId: string, items: CuttingJobItemInput[], plan: PlanResult) => Promise<boolean | undefined>;
 
   // open/close-modal pattern, mirrored from AppContext — no inventory
   // modals exist yet in Phase 1, but Phase 2's cutting-plan flow will add
@@ -86,6 +92,17 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
     const newCategory = mapStockCategory(data);
     setCategories((prev) => [...prev, newCategory].sort((a, b) => a.name.localeCompare(b.name)));
     return newCategory;
+  };
+
+  const updateCategory = async (id: string, name: string): Promise<boolean> => {
+    const trimmed = name.trim();
+    if (!trimmed) return false;
+    const { error } = await supabase.from('inv_categories').update({ name: trimmed }).eq('id', id);
+    if (error) return false;
+    setCategories((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, name: trimmed } : c)).sort((a, b) => a.name.localeCompare(b.name))
+    );
+    return true;
   };
 
   const deleteCategory = async (id: string): Promise<boolean> => {
@@ -350,8 +367,8 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
     }
     return true;
   };
- 
-  
+
+
 
   const value = useMemo<InventoryContextValue>(
     () => ({
@@ -360,6 +377,7 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
       wasteLines,
       dataLoading,
       addCategory: guardMobile(addCategory, isMobileView),
+      updateCategory: guardMobile(updateCategory, isMobileView),
       deleteCategory: guardMobile(deleteCategory, isMobileView),
       addStockLine: guardMobile(addStockLine, isMobileView),
       updateStockQuantity: guardMobile(updateStockQuantity, isMobileView),

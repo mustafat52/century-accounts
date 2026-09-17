@@ -22,6 +22,7 @@ import Links from './pages/Links';
 import CategoriesStock from './pages/inventory/CategoriesStock';
 import WasteLedger from './pages/inventory/WasteLedger';
 import CuttingPlan from './pages/inventory/CuttingPlan';
+import CuttingHistory from './pages/inventory/CuttingHistory';
 
 function ProtectedShell() {
   const { isAuthenticated, authLoading, dataLoading, hasLoadedOnce } = useApp();
@@ -95,6 +96,7 @@ function InventoryShell() {
             <Route path="stock" element={<CategoriesStock />} />
             <Route path="waste" element={<WasteLedger />} />
             <Route path="cutting" element={<CuttingPlan />} />
+            <Route path="history" element={<CuttingHistory />} />
             <Route index element={<Navigate to="stock" replace />} />
           </Routes>
         </main>
