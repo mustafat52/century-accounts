@@ -20,16 +20,15 @@ interface InventoryContextValue {
   wasteLines: WasteLine[];
   dataLoading: boolean;
 
-  // Return types include `| undefined` (addCategory/deleteCategory/
-  // addStockLine/confirmCut) to reflect what guardMobile actually does
-  // on a blocked mobile call — see mobileGuard.ts. updateStockQuantity
-  // and deleteStockLine resolve to void either way, so no change needed
-  // there: undefined is already assignable to void.
-  addCategory: (input: NewStockCategoryInput) => Promise<StockCategory | null | undefined>;
-  updateCategory: (id: string, name: string) => Promise<boolean | undefined>;
-  deleteCategory: (id: string) => Promise<boolean | undefined>;
+  // Note: guardMobile preserves each wrapped function's original type
+  // exactly (see mobileGuard.ts) — it's shared with AppContext.tsx on
+  // the accounting side, which doesn't expect `| undefined` on these,
+  // so these signatures stay as plain as they were originally.
+  addCategory: (input: NewStockCategoryInput) => Promise<StockCategory | null>;
+  updateCategory: (id: string, name: string) => Promise<boolean>;
+  deleteCategory: (id: string) => Promise<boolean>;
 
-  addStockLine: (input: NewStockLineInput) => Promise<StockLine | null | undefined>;
+  addStockLine: (input: NewStockLineInput) => Promise<StockLine | null>;
   updateStockQuantity: (id: string, quantity: number) => Promise<void>;
   deleteStockLine: (id: string) => Promise<void>;
 
@@ -39,7 +38,7 @@ interface InventoryContextValue {
   // the database. confirmCut is the only action that mutates data, per
   // the plan/commit split in the spec.
   generatePlan: (categoryId: string, items: CuttingJobItemInput[]) => PlanResult;
-  confirmCut: (categoryId: string, items: CuttingJobItemInput[], plan: PlanResult) => Promise<boolean | undefined>;
+  confirmCut: (categoryId: string, items: CuttingJobItemInput[], plan: PlanResult) => Promise<boolean>;
 
   // open/close-modal pattern, mirrored from AppContext — no inventory
   // modals exist yet in Phase 1, but Phase 2's cutting-plan flow will add
