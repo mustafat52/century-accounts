@@ -903,8 +903,16 @@ tbody tr:hover { background: var(--surface-2); }
   inset: 0;
   background: rgba(10, 11, 14, 0.78);
   display: flex;
-  align-items: flex-start;
-  justify-content: center;
+  /* This was missing — without it, the default row direction put the
+     toolbar and the page SIDE BY SIDE instead of stacked, which only
+     had enough slack to look right on very wide screens. On anything
+     narrower (any laptop under ~1600px wide, not just phones),
+     justify-content: center was centering that too-wide horizontal
+     pair and clipping both ends — the exact "partial, cut-off page"
+     symptom on mobile, just less obvious on a big desktop monitor. */
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
   overflow-y: auto;
   z-index: 70;
   padding: 40px 20px;
@@ -1129,8 +1137,10 @@ tbody tr:hover { background: var(--surface-2); }
   inset: 0;
   background: rgba(10, 11, 14, 0.78);
   display: flex;
-  align-items: flex-start;
-  justify-content: center;
+  /* Same fix as .receipt-overlay above — see that comment. */
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
   overflow-y: auto;
   z-index: 70;
   padding: 40px 20px;
