@@ -85,7 +85,7 @@ export default function PrintableDocument() {
           </div>
 
           <div className="receipt-section-label">Items Requested</div>
-          <table className="receipt-table" style={{ fontSize: 11 }}>
+          <table className="receipt-table receipt-table-slip" style={{ fontSize: 11 }}>
             <thead>
               <tr>
                 <th>Description</th>
@@ -181,7 +181,7 @@ export default function PrintableDocument() {
           </div>
 
           <div className="receipt-section-label">Payments Received</div>
-          <table className="receipt-table">
+          <table className="receipt-table receipt-table-payments">
             <thead>
               <tr>
                 <th>Date</th>
@@ -334,7 +334,7 @@ export default function PrintableDocument() {
         {glassItems.length > 0 && (
           <>
             <div className="receipt-section-label">Glass Work</div>
-            <table className="receipt-table">
+            <table className="receipt-table receipt-table-glass">
               <thead>
                 <tr>
                   <th>Area</th>
@@ -374,7 +374,7 @@ export default function PrintableDocument() {
         {hardwareItems.length > 0 && (
           <>
             <div className="receipt-section-label">{glassItems.length > 0 ? 'Architectural Hardware' : 'Items'}</div>
-            <table className="receipt-table">
+            <table className="receipt-table receipt-table-hardware">
               <thead>
                 <tr>
                   <th>Description of Goods</th>

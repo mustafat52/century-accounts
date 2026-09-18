@@ -1088,7 +1088,7 @@ tbody tr:hover { background: var(--surface-2); }
    860px these stack instead of sitting side by side, and the page's own
    padding shrinks to leave more room for actual content — the document
    itself is otherwise unchanged, right down to what prints. */
-@media (max-width: 860px) {
+@media screen and (max-width: 860px) {
   .receipt-overlay { padding: 16px 10px; }
   .receipt-page { padding: 18px 16px; }
 
@@ -1101,6 +1101,97 @@ tbody tr:hover { background: var(--surface-2); }
 
   .receipt-footer { flex-direction: column; align-items: flex-start; gap: 14px; }
   .receipt-signature { align-self: flex-end; }
+
+  /* The Glass Work table has 11 columns — no font-size small enough
+     makes that legible at ~280px wide. Rather than a scrolling table,
+     each row becomes a small labeled spec list instead: every field
+     stacks in its natural reading order (already the right order —
+     Area, Description, Thickness... Amount last, like reading down an
+     itemized line), one fact per line, so nothing needs to shrink or
+     scroll to be readable. Same treatment for the other three receipt
+     tables (Hardware, Slip items, Ledger payments) for consistency and
+     because they lose their column headers here too, just with fewer,
+     shorter labels since they have fewer columns. This only touches
+     the SCREEN presentation — explicitly `screen`, not just a bare
+     max-width query, so it can never affect the actual printed/PDF
+     page even if print is triggered from a narrow browser window. */
+  .receipt-table thead { display: none; }
+  .receipt-table tbody tr {
+    display: block;
+    padding: 10px 0;
+    border-bottom: 1px solid #eee;
+  }
+  .receipt-table tbody tr:last-child { border-bottom: none; }
+  .receipt-table td {
+    display: block;
+    padding: 1px 0 !important;
+    border: none !important;
+    text-align: left !important;
+    font-size: 11px;
+  }
+  .receipt-table td[colspan] { padding: 4px 0 !important; }
+
+  /* Glass Work: Area, Description, Thickness, Size, Qty, Sft, Rate/Sft,
+     Rft, Polish, Fixing, Amount — in that DOM order already. */
+  .receipt-table-glass td:nth-child(1) {
+    font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; color: #888;
+  }
+  .receipt-table-glass td:nth-child(2) { font-weight: 700; font-size: 12px; color: #1a1a1a; }
+  .receipt-table-glass td:nth-child(3)::before { content: 'Thickness: '; color: #999; }
+  .receipt-table-glass td:nth-child(4)::before { content: 'Size: '; color: #999; }
+  .receipt-table-glass td:nth-child(5)::before { content: 'Qty: '; color: #999; }
+  .receipt-table-glass td:nth-child(6)::before { content: 'Sft: '; color: #999; }
+  .receipt-table-glass td:nth-child(7)::before { content: 'Rate/Sft: '; color: #999; }
+  .receipt-table-glass td:nth-child(8)::before { content: 'Rft: '; color: #999; }
+  .receipt-table-glass td:nth-child(9)::before { content: 'Polish: '; color: #999; }
+  .receipt-table-glass td:nth-child(10)::before { content: 'Fixing: '; color: #999; }
+  .receipt-table-glass td:nth-child(3),
+  .receipt-table-glass td:nth-child(4),
+  .receipt-table-glass td:nth-child(5),
+  .receipt-table-glass td:nth-child(6),
+  .receipt-table-glass td:nth-child(7),
+  .receipt-table-glass td:nth-child(8),
+  .receipt-table-glass td:nth-child(9),
+  .receipt-table-glass td:nth-child(10) { color: #555; }
+  .receipt-table-glass td:nth-child(11) {
+    font-weight: 700;
+    font-size: 13px;
+    color: #1a1a1a;
+    margin-top: 4px;
+    padding-top: 6px !important;
+    border-top: 1px dashed #ddd !important;
+  }
+  .receipt-table-glass td:nth-child(11)::before { content: 'Amount: '; font-weight: 400; color: #888; font-size: 10px; }
+
+  /* Hardware: Description, Qty, Rate, Amount */
+  .receipt-table-hardware td:nth-child(1) { font-weight: 700; font-size: 12px; color: #1a1a1a; }
+  .receipt-table-hardware td:nth-child(2)::before { content: 'Qty: '; color: #999; }
+  .receipt-table-hardware td:nth-child(3)::before { content: 'Rate: '; color: #999; }
+  .receipt-table-hardware td:nth-child(2),
+  .receipt-table-hardware td:nth-child(3) { color: #555; }
+  .receipt-table-hardware td:nth-child(4) {
+    font-weight: 700; margin-top: 4px; padding-top: 6px !important; border-top: 1px dashed #ddd !important;
+  }
+  .receipt-table-hardware td:nth-child(4)::before { content: 'Amount: '; font-weight: 400; color: #888; font-size: 10px; }
+
+  /* Slip items (rate/amount blank until priced): Description, Quantity,
+     Unit, Rate, Amount */
+  .receipt-table-slip td:nth-child(1) { font-weight: 700; font-size: 12px; color: #1a1a1a; }
+  .receipt-table-slip td:nth-child(2)::before { content: 'Quantity: '; color: #999; }
+  .receipt-table-slip td:nth-child(3)::before { content: 'Unit: '; color: #999; }
+  .receipt-table-slip td:nth-child(2),
+  .receipt-table-slip td:nth-child(3) { color: #555; }
+  .receipt-table-slip td:nth-child(4):empty,
+  .receipt-table-slip td:nth-child(5):empty { display: none; }
+
+  /* Ledger payments: Date, Mode, Note, Amount */
+  .receipt-table-payments td:nth-child(1) { font-weight: 700; font-size: 12px; color: #1a1a1a; }
+  .receipt-table-payments td:nth-child(2)::before { content: 'Mode: '; color: #999; }
+  .receipt-table-payments td:nth-child(3)::before { content: 'Note: '; color: #999; }
+  .receipt-table-payments td:nth-child(2),
+  .receipt-table-payments td:nth-child(3) { color: #555; }
+  .receipt-table-payments td:nth-child(4) { font-weight: 700; margin-top: 2px; }
+  .receipt-table-payments td:nth-child(4)::before { content: 'Amount: '; font-weight: 400; color: #888; font-size: 10px; }
 }
 
 @media print {
