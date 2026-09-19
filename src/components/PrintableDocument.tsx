@@ -59,6 +59,17 @@ export default function PrintableDocument() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [printTarget?.kind, printTarget?.id]);
 
+  // On mobile this overlay scrolls as part of the normal page (see the
+  // .receipt-overlay comment in global.css for why) rather than being a
+  // fixed, self-contained panel — so without this, opening a document
+  // while scrolled partway down a list would open it below the current
+  // viewport, out of sight. Harmless no-op on desktop, where the
+  // overlay is still position: fixed and already always visible
+  // regardless of page scroll.
+  useEffect(() => {
+    if (printTarget) window.scrollTo(0, 0);
+  }, [printTarget]);
+
   if (!printTarget) return null;
 
   if (printTarget.kind === 'slip') {

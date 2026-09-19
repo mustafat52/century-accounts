@@ -1089,7 +1089,41 @@ tbody tr:hover { background: var(--surface-2); }
    padding shrinks to leave more room for actual content — the document
    itself is otherwise unchanged, right down to what prints. */
 @media screen and (max-width: 860px) {
-  .receipt-overlay { padding: 16px 10px; }
+  /* The real fix for the black-background-partway-down-a-long-document
+     bug: .receipt-overlay is position: fixed with its OWN internal
+     scroll (overflow-y: auto), and fixed-position elements with very
+     tall internally-scrolled content have a genuine, known painting
+     limitation on some mobile browsers — the background stops being
+     painted past some height while the text inside keeps rendering
+     fine, which is exactly what was happening. Normal page scrolling
+     doesn't have this limit (it's the single most common thing a
+     browser does), so on mobile this switches from fixed+internal-
+     scroll to a normally-flowing block that scrolls with the page
+     instead — no separate scroll container, no compositing limit to
+     hit regardless of how many line items a document has. The
+     PrintableDocument component scrolls the page to the top when one
+     of these opens (see PrintableDocument.tsx), so it's still
+     immediately visible no matter where the app itself was scrolled to
+     first, and the toolbar is pinned via position: sticky so Print/
+     Download/Close stay reachable while scrolling a long document. */
+  .receipt-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: auto;
+    min-height: 100vh;
+    overflow-y: visible;
+    padding: 0 10px 16px;
+  }
+  .receipt-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: rgba(10, 11, 14, 0.95);
+    margin: 0 -10px 12px;
+    padding: 16px 10px 12px;
+  }
   .receipt-page { padding: 18px 16px; }
   /* .receipt-page simulates a full A4 page (min-height: 297mm) so the
      desktop/print view looks like real paper, with .receipt-bottom's
@@ -1100,10 +1134,7 @@ tbody tr:hover { background: var(--surface-2); }
      simulation entirely: the box becomes exactly as tall as its real
      content, and without leftover height for margin-top: auto to
      distribute, .receipt-bottom just follows immediately after the
-     totals. This is also a defensive fix for a black-background glitch
-     reported on-screen at the bottom of long documents — removing the
-     large fixed-height floor removes whatever was causing it, rather
-     than patching the symptom without being fully sure of the cause. */
+     totals. */
   .receipt-page { min-height: 0; }
   .receipt-bottom { margin-top: 20px; background: #ffffff; }
   .receipt-two-col, .receipt-two-col > *, .receipt-footer { background: #ffffff; }
