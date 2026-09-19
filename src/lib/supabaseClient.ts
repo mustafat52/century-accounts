@@ -16,6 +16,6 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     // app (new tab, browser restart, etc.) should land on /login rather
     // than silently restoring a previous login. Session still works
     // normally for as long as this tab/page stays open.
-    persistSession: false,
+    persistSession: true,
   },
 });
