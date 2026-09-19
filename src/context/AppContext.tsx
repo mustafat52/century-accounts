@@ -222,7 +222,7 @@ interface AppContextValue {
   invoices: Invoice[];
   // Roll back a settled invoice: deletes it outright and reopens its
   // source quotation as 'pending' again, exactly where it left off.
-  rollbackInvoiceToQuotation: (invoiceDbId: string) => Promise<void>;
+  rollbackInvoiceToQuotation: (invoiceDbId: string) => Promise<string | null>;
 
   quotations: Quotation[];
   addQuotation: (input: NewQuotationInput) => Promise<Quotation | null>;
@@ -879,11 +879,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // cascade) and reopens its source quotation as 'pending' again. The
   // quotation's payment history was never moved anywhere by conversion in
   // the first place, so nothing needs restoring — it just picks back up.
-  const rollbackInvoiceToQuotation = async (invoiceDbId: string) => {
+  const rollbackInvoiceToQuotation = async (invoiceDbId: string): Promise<string | null> => {
     const { error } = await supabase.rpc('rollback_invoice_to_quotation', { p_invoice_id: invoiceDbId });
-    if (error) return;
+    // Previously just `if (error) return;` — failed completely silently,
+    // which is exactly why this was so hard to diagnose: nothing visibly
+    // happened and nothing said why. Now the actual Postgres error
+    // message (permission denied, function signature mismatch, whatever
+    // it turns out to be) surfaces in the UI instead of vanishing here.
+    if (error) return error.message;
     setInvoices((prev) => prev.filter((i) => i.dbId !== invoiceDbId));
     await Promise.all([refreshQuotations(), refreshCustomers(), refreshDashboardSummary()]);
+    return null;
   };
 
   // ---------- Quotations ----------

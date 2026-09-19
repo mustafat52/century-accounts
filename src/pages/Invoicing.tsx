@@ -35,6 +35,7 @@ export default function Invoicing() {
     deleteQuotation,
   } = useApp();
   const [rollbackTarget, setRollbackTarget] = useState<Invoice | null>(null);
+  const [rollbackError, setRollbackError] = useState('');
   const [deleteQuotationTarget, setDeleteQuotationTarget] = useState<Quotation | null>(null);
   const [search, setSearch] = useState('');
   // URL-driven (not local state) so the tab survives navigation from
@@ -94,6 +95,20 @@ export default function Invoicing() {
     <>
       <Topbar title="Invoicing" subtitle="Quotations carry every job from creation to full payment" showInvoiceActions />
       <div className="view-body">
+        {rollbackError && (
+          <div
+            style={{
+              color: 'var(--danger)',
+              fontSize: 13,
+              marginBottom: 14,
+              padding: '10px 12px',
+              background: 'var(--danger-dim)',
+              borderRadius: 8,
+            }}
+          >
+            Roll back failed: {rollbackError}
+          </div>
+        )}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <div className="chip-row" style={{ marginBottom: 0 }}>
             <button className={`chip${tab === 'quotations' ? ' is-active' : ''}`} onClick={() => setTab('quotations')}>
@@ -293,12 +308,19 @@ export default function Invoicing() {
         confirmLabel="Roll back"
         danger
         onConfirm={async () => {
-          if (rollbackTarget) await rollbackInvoiceToQuotation(rollbackTarget.dbId);
+          if (!rollbackTarget) return;
+          const err = await rollbackInvoiceToQuotation(rollbackTarget.dbId);
+          if (err) {
+            // Leave the dialog target as-is context aside — close it and
+            // show the real reason on the page instead of pretending it
+            // worked. This is exactly the case that used to fail with
+            // zero feedback.
+            setRollbackTarget(null);
+            setRollbackError(err);
+            return;
+          }
           setRollbackTarget(null);
-          // Land the person on the reopened quotation instead of leaving
-          // them on Invoices, where it no longer appears — also clears
-          // any active status filter so a re-pending quotation isn't
-          // hidden by e.g. an "Overdue" filter left on from before.
+          setRollbackError('');
           setTab('quotations');
           setFilter('all');
         }}
