@@ -295,6 +295,12 @@ export default function Invoicing() {
         onConfirm={async () => {
           if (rollbackTarget) await rollbackInvoiceToQuotation(rollbackTarget.dbId);
           setRollbackTarget(null);
+          // Land the person on the reopened quotation instead of leaving
+          // them on Invoices, where it no longer appears — also clears
+          // any active status filter so a re-pending quotation isn't
+          // hidden by e.g. an "Overdue" filter left on from before.
+          setTab('quotations');
+          setFilter('all');
         }}
         onCancel={() => setRollbackTarget(null)}
       />
