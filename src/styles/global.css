@@ -1091,6 +1091,22 @@ tbody tr:hover { background: var(--surface-2); }
 @media screen and (max-width: 860px) {
   .receipt-overlay { padding: 16px 10px; }
   .receipt-page { padding: 18px 16px; }
+  /* .receipt-page simulates a full A4 page (min-height: 297mm) so the
+     desktop/print view looks like real paper, with .receipt-bottom's
+     margin-top: auto pinning Bank Details/Terms/signature to the
+     bottom of that simulated page. On a phone there's no "page" being
+     conveyed — someone scrolling this is just reading content, not
+     looking at a page proportions preview — so this drops the A4
+     simulation entirely: the box becomes exactly as tall as its real
+     content, and without leftover height for margin-top: auto to
+     distribute, .receipt-bottom just follows immediately after the
+     totals. This is also a defensive fix for a black-background glitch
+     reported on-screen at the bottom of long documents — removing the
+     large fixed-height floor removes whatever was causing it, rather
+     than patching the symptom without being fully sure of the cause. */
+  .receipt-page { min-height: 0; }
+  .receipt-bottom { margin-top: 20px; background: #ffffff; }
+  .receipt-two-col, .receipt-two-col > *, .receipt-footer { background: #ffffff; }
 
   .receipt-head { flex-direction: column; gap: 10px; }
   .receipt-meta { text-align: left; }

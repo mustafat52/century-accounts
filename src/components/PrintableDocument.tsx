@@ -4,6 +4,7 @@ import { formatINR } from '../utils/format';
 import type { QuotationItem } from '../types';
 import { PAYMENT_METHOD_LABELS } from '../types';
 import logoLight from '../assets/logo-light.png';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 const BUSINESS_HEADER = (
   <div style={{ fontSize: 10, color: '#666', marginTop: 4, lineHeight: 1.4 }}>
@@ -28,6 +29,18 @@ export default function PrintableDocument() {
     convertQuotationToInvoice,
     fetchQuotationItemsForPrint,
   } = useApp();
+
+  // On mobile there's no physical printer to speak of — the native print
+  // dialog's default (and usually only sane) destination is "Save as
+  // PDF", so the same window.print() call already gives mobile exactly
+  // the "download a clean PDF" behavior asked for. It also renders using
+  // the @media print rules further down global.css, which are untouched
+  // by any of the @media screen mobile-only changes above — so the
+  // downloaded file always looks like the proper desktop-styled
+  // document, never the on-screen stacked mobile view. Relabeling here
+  // rather than building a separate export pipeline.
+  const isMobileView = useIsMobile();
+  const printButtonLabel = isMobileView ? 'Download PDF' : 'Print';
 
   // Quotations don't carry their items in app state (unlike invoices,
   // which are preloaded) — so printing one means fetching its real,
@@ -57,7 +70,7 @@ export default function PrintableDocument() {
       <div className="receipt-overlay">
         <div className="receipt-toolbar no-print">
           <button className="btn btn-ghost" onClick={() => window.print()}>
-            Print
+            {printButtonLabel}
           </button>
           <button className="btn btn-ghost" onClick={closePrint}>
             Close
@@ -154,7 +167,7 @@ export default function PrintableDocument() {
             </button>
           )}
           <button className="btn btn-ghost" onClick={() => window.print()}>
-            Print
+            {printButtonLabel}
           </button>
           <button className="btn btn-ghost" onClick={closePrint}>
             Close
@@ -299,7 +312,7 @@ export default function PrintableDocument() {
     <div className="receipt-overlay">
       <div className="receipt-toolbar no-print">
         <button className="btn btn-ghost" onClick={() => window.print()}>
-          Print
+          {printButtonLabel}
         </button>
         <button className="btn btn-ghost" onClick={closePrint}>
           Close
