@@ -27,6 +27,8 @@ import type {
   PurchaseBillItem,
   PurchaseBillTaxType,
   QuotationItem,
+  EmployeeProfile,
+  UserRole,
 } from '../types';
 import { SLAB_DISCOUNT_PERCENT } from '../types';
 import { supabase } from '../lib/supabaseClient';
@@ -54,6 +56,7 @@ import {
   mapPurchaseBill,
   mapPurchaseBillItem,
   mapQuotationItem,
+  mapEmployeeProfile,
 } from '../lib/mappers';
 
 export type NewQuotationItemInput =
@@ -308,8 +311,32 @@ interface AppContextValue {
   hasLoadedOnce: boolean;
   isAuthenticated: boolean;
   currentUserName: string | null;
-  login: (email: string, password: string) => Promise<string | null>;
+  currentUserId: string | null;
+  // 'owner' only for Abdul Hussain's login — gates the Employee Control
+  // tab and the mutating actions on it (see migrations/002_employee_control.sql).
+  // null while auth is still resolving.
+  currentUserRole: UserRole | null;
+  login: (email: string, password: string) => Promise<{ name: string } | { error: string }>;
   logout: () => Promise<void>;
+  // Set once, right after sign-in fails because the account's isActive
+  // flag is off, or after being force-signed-out mid-session for the
+  // same reason (see the periodic check in AppProvider) — Login.tsx
+  // surfaces this as the error message, then clears it.
+  accessDeniedMessage: string | null;
+  clearAccessDeniedMessage: () => void;
+
+  // ---- Employee control (owner only — see role above) ----
+  // Loaded only when currentUserRole === 'owner'; empty for an employee,
+  // since there's nothing for them to manage. RLS also allows any
+  // signed-in user to read every profiles row, so this isn't a security
+  // boundary by itself — the DB-side owner check on writes is (see the
+  // migration) — this is just about not loading unused data for staff.
+  employees: EmployeeProfile[];
+  refreshEmployees: () => Promise<void>;
+  // Returns an error message on failure, or null on success.
+  setEmployeeActive: (id: string, isActive: boolean) => Promise<string | null>;
+  createEmployee: (input: { displayName: string; email: string; password: string }) => Promise<string | null>;
+  deleteEmployee: (id: string) => Promise<string | null>;
 
   // True below the mobile breakpoint (see useIsMobile.ts). Every mutating
   // function on this context already no-ops itself when this is true
@@ -361,6 +388,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const [session, setSession] = useState<Session | null>(null);
   const [currentUserName, setCurrentUserName] = useState<string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null);
+  const [accessDeniedMessage, setAccessDeniedMessage] = useState<string | null>(null);
+  const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
   const [authLoading, setAuthLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(false);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
@@ -586,27 +616,118 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!session) {
       setCurrentUserName(null);
+      setCurrentUserRole(null);
       return;
     }
     supabase
       .from('profiles')
-      .select('display_name')
+      .select('display_name, role, is_active')
       .eq('id', session.user.id)
       .single()
-      .then(({ data }) => setCurrentUserName(data?.display_name ?? session.user.email ?? null));
+      .then(async ({ data }) => {
+        // Someone switched this login off (see Employee Control) while
+        // it happened to have a lingering session — deny entry the same
+        // as a fresh sign-in would, rather than letting the app load.
+        if (data && data.is_active === false) {
+          setAccessDeniedMessage('Your access has been switched off. Contact the business owner.');
+          await supabase.auth.signOut();
+          return;
+        }
+        setCurrentUserName(data?.display_name ?? session.user.email ?? null);
+        setCurrentUserRole(data?.role === 'owner' ? 'owner' : 'employee');
+      });
     loadAllData();
   }, [session, loadAllData]);
 
+  // Catches the case where someone's access is switched off WHILE they're
+  // already using the app — the check above only runs once, right when a
+  // session first appears. Re-checked periodically, and immediately when
+  // the tab/app comes back into view (covers a phone being reopened after
+  // being backgrounded, which is the more common way this matters on
+  // mobile than an actual page reload).
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+
+    const checkStillActive = async () => {
+      const { data } = await supabase.from('profiles').select('is_active').eq('id', session.user.id).single();
+      if (cancelled) return;
+      if (data && data.is_active === false) {
+        setAccessDeniedMessage('Your access has been switched off. Contact the business owner.');
+        await supabase.auth.signOut();
+      }
+    };
+
+    const intervalId = window.setInterval(checkStillActive, 60000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') checkStillActive();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [session]);
+
+  // ---------- Employee control (owner only) ----------
+  const refreshEmployees = useCallback(async () => {
+    const { data } = await supabase.from('profiles').select('*').order('display_name');
+    if (data) setEmployees(data.map(mapEmployeeProfile));
+  }, []);
+
+  useEffect(() => {
+    if (currentUserRole === 'owner') refreshEmployees();
+  }, [currentUserRole, refreshEmployees]);
+
+  const setEmployeeActive = async (id: string, isActive: boolean): Promise<string | null> => {
+    const { error } = await supabase.from('profiles').update({ is_active: isActive }).eq('id', id);
+    if (error) return error.message;
+    setEmployees((prev) => prev.map((e) => (e.id === id ? { ...e, isActive } : e)));
+    return null;
+  };
+
+  // create/delete both go through the manage-employee Edge Function,
+  // which is the only place the Supabase service-role key lives — this
+  // app otherwise never has permission to create or remove a login.
+  const createEmployee = async (input: { displayName: string; email: string; password: string }): Promise<string | null> => {
+    const { data, error } = await supabase.functions.invoke('manage-employee', {
+      body: { action: 'create', ...input },
+    });
+    const remoteError = (data as { error?: string } | null)?.error;
+    if (error || remoteError) return remoteError ?? error?.message ?? 'Could not create the login.';
+    await refreshEmployees();
+    return null;
+  };
+
+  const deleteEmployee = async (id: string): Promise<string | null> => {
+    const { data, error } = await supabase.functions.invoke('manage-employee', {
+      body: { action: 'delete', id },
+    });
+    const remoteError = (data as { error?: string } | null)?.error;
+    if (error || remoteError) return remoteError ?? error?.message ?? 'Could not delete the login.';
+    setEmployees((prev) => prev.filter((e) => e.id !== id));
+    return null;
+  };
+
   // ---------- Auth actions ----------
-  const login = async (email: string, password: string): Promise<string | null> => {
+  const login = async (email: string, password: string): Promise<{ name: string } | { error: string }> => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error || !data.session) return null;
+    if (error || !data.session) return { error: 'Incorrect email or password.' };
+
     const { data: profile } = await supabase
       .from('profiles')
-      .select('display_name')
+      .select('display_name, is_active')
       .eq('id', data.session.user.id)
       .single();
-    return profile?.display_name ?? data.session.user.email ?? null;
+
+    if (profile && profile.is_active === false) {
+      await supabase.auth.signOut();
+      return { error: 'Your access has been switched off. Contact the business owner.' };
+    }
+
+    return { name: profile?.display_name ?? data.session.user.email ?? 'there' };
   };
 
   const logout = async () => {
@@ -1366,8 +1487,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       hasLoadedOnce,
       isAuthenticated,
       currentUserName,
+      currentUserId: session?.user.id ?? null,
+      currentUserRole,
       login,
       logout,
+      accessDeniedMessage,
+      clearAccessDeniedMessage: () => setAccessDeniedMessage(null),
+      employees,
+      refreshEmployees,
+      setEmployeeActive: guardMobile(setEmployeeActive, isMobileView),
+      createEmployee: guardMobile(createEmployee, isMobileView),
+      deleteEmployee: guardMobile(deleteEmployee, isMobileView),
       isMobileView,
     }),
     [
@@ -1410,6 +1540,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       hasLoadedOnce,
       isAuthenticated,
       currentUserName,
+      session,
+      currentUserRole,
+      accessDeniedMessage,
+      employees,
+      refreshEmployees,
     ]
   );
 

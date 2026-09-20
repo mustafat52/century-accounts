@@ -4,7 +4,7 @@ import logoDark from '../assets/logo-dark.png';
 import { NAV_ITEMS } from '../nav';
 
 export default function Sidebar() {
-  const { gstEnabled, toggleGst, logout, currentUserName } = useApp();
+  const { gstEnabled, toggleGst, logout, currentUserName, currentUserRole } = useApp();
 
   return (
     <aside className="sidebar">
@@ -25,6 +25,12 @@ export default function Sidebar() {
             <span className="nav-label">{item.label}</span>
           </NavLink>
         ))}
+        {currentUserRole === 'owner' && (
+          <NavLink to="/employees" className={({ isActive }) => `nav-item${isActive ? ' is-active' : ''}`}>
+            <span className="nav-seam" />
+            <span className="nav-label">Employee Control</span>
+          </NavLink>
+        )}
       </nav>
 
       <div className="sidebar-foot">

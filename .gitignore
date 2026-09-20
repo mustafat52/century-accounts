@@ -24,3 +24,5 @@ npm-debug.log*
 *.njsproj
 *.sln
 *.sw?
+
+supabase/functions/e.txt

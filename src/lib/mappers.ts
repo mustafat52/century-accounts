@@ -21,6 +21,7 @@ import type {
   PurchaseBill,
   PurchaseBillItem,
   PaymentMethod,
+  EmployeeProfile,
 } from '../types';
 
 // These mirror the Supabase table/view column names (snake_case).
@@ -288,6 +289,16 @@ export function mapPurchaseBillItem(row: any): PurchaseBillItem {
     sgstAmount: Number(row.sgst_amount),
     igstAmount: Number(row.igst_amount),
     sortOrder: Number(row.sort_order ?? 0),
+  };
+}
+
+export function mapEmployeeProfile(row: any): EmployeeProfile {
+  return {
+    id: row.id,
+    displayName: row.display_name,
+    email: row.email,
+    role: row.role === 'owner' ? 'owner' : 'employee',
+    isActive: Boolean(row.is_active),
   };
 }
 

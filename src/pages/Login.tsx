@@ -8,7 +8,7 @@ const WELCOME_DURATION_MS = 2200;
 type AppMode = 'accounts' | 'inventory';
 
 export default function Login() {
-  const { login } = useApp();
+  const { login, accessDeniedMessage, clearAccessDeniedMessage } = useApp();
   const navigate = useNavigate();
 
   const [mode, setMode] = useState<AppMode>('accounts');
@@ -17,6 +17,17 @@ export default function Login() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [welcomeName, setWelcomeName] = useState<string | null>(null);
+
+  // Landing here right after being force-signed-out mid-session because
+  // an owner switched this login off (see AppContext's periodic check) —
+  // show that as the reason rather than a silent redirect to a blank
+  // login form.
+  useEffect(() => {
+    if (accessDeniedMessage) {
+      setError(accessDeniedMessage);
+      clearAccessDeniedMessage();
+    }
+  }, [accessDeniedMessage, clearAccessDeniedMessage]);
 
   useEffect(() => {
     if (!welcomeName) return;
@@ -31,13 +42,13 @@ export default function Login() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
-    const name = await login(email, password);
+    const result = await login(email, password);
     setSubmitting(false);
-    if (name) {
+    if ('name' in result) {
       setError('');
-      setWelcomeName(name);
+      setWelcomeName(result.name);
     } else {
-      setError('Incorrect email or password.');
+      setError(result.error);
     }
   };
 

@@ -4,7 +4,7 @@ import { NAV_ITEMS } from '../nav';
 import { useApp } from '../context/AppContext';
 
 export default function MobileNav() {
-  const { logout } = useApp();
+  const { logout, currentUserRole } = useApp();
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -25,6 +25,11 @@ export default function MobileNav() {
             {item.label}
           </NavLink>
         ))}
+        {currentUserRole === 'owner' && (
+          <NavLink to="/employees" className={({ isActive }) => `mobile-nav-tab${isActive ? ' is-active' : ''}`}>
+            Employees
+          </NavLink>
+        )}
       </div>
       <div className="mobile-nav-foot">
         <span className="mobile-nav-banner">View only on mobile — add or edit records from a computer</span>

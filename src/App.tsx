@@ -19,6 +19,7 @@ import PurchaseBills from './pages/PurchaseBills';
 import Expenses from './pages/Expenses';
 import Reports from './pages/Reports';
 import Links from './pages/Links';
+import EmployeeControl from './pages/EmployeeControl';
 import CategoriesStock from './pages/inventory/CategoriesStock';
 import WasteLedger from './pages/inventory/WasteLedger';
 import CuttingPlan from './pages/inventory/CuttingPlan';
@@ -57,6 +58,7 @@ function ProtectedShell() {
             <Route path="/expenses" element={<Expenses />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/links" element={<Links />} />
+            <Route path="/employees" element={<EmployeeControl />} />
           </Routes>
         )}
       </main>

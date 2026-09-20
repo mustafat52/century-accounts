@@ -328,6 +328,23 @@ export interface DashboardSummary {
   jobsCompletedThisMonth: number;
 }
 
+// ---- Employee control ----
+// 'owner' is Abdul Hussain (see migrations/002_employee_control.sql) —
+// only an owner sees the Employee Control tab, and only an owner can
+// flip another login's isActive switch or delete it. isActive is checked
+// right after sign-in and periodically while the app is open (see
+// AppContext) — switching someone off locks them out of the app, it
+// doesn't change what they could see/do while they were still signed in.
+export type UserRole = 'owner' | 'employee';
+
+export interface EmployeeProfile {
+  id: string;
+  displayName: string;
+  email: string;
+  role: UserRole;
+  isActive: boolean;
+}
+
 export interface PriceListItem {
   id: string;
   description: string;
