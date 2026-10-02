@@ -84,6 +84,13 @@ export default function Reports() {
   // a one-month-wide range already does that.
   const [customFrom, setCustomFrom] = useState(currentMonthValue());
   const [customTo, setCustomTo] = useState(currentMonthValue());
+  // Free-text search over the name-based lists on this page (customers,
+  // vendors, expense categories/descriptions). It only filters what is
+  // DISPLAYED — totals, the chart and the Excel export always use the full
+  // period data so a search never changes the numbers that get exported.
+  const [search, setSearch] = useState('');
+  const query = search.trim().toLowerCase();
+  const matches = (text: string) => !query || text.toLowerCase().includes(query);
 
   const anchor = useMemo(
     () => latestDate([...invoices.map((i) => i.date), ...expenses.map((e) => e.date), ...quotations.map((q) => q.date)]),
@@ -164,14 +171,18 @@ export default function Reports() {
     return buckets;
   }, [periodQuotations]);
 
-  const topCustomers = useMemo(() => {
+  // Full ranking of every customer with business in the period; the "top"
+  // list is its first five. Search runs over the full ranking so a customer
+  // outside the top five can still be found.
+  const customerRanking = useMemo(() => {
     const map = new Map<string, number>();
     periodQuotations.forEach((q) => map.set(q.customerId, (map.get(q.customerId) ?? 0) + q.grandTotal));
     return Array.from(map.entries())
-      .map(([id, amount]) => ({ name: customers.find((c) => c.id === id)?.name ?? '—', amount }))
-      .sort((a, b) => b.amount - a.amount)
-      .slice(0, 5);
+      .map(([id, amount]) => ({ id, name: customers.find((c) => c.id === id)?.name ?? '—', amount }))
+      .sort((a, b) => b.amount - a.amount);
   }, [periodQuotations, customers]);
+  const topCustomers = useMemo(() => customerRanking.slice(0, 5), [customerRanking]);
+  const shownCustomers = query ? customerRanking.filter((c) => matches(c.name)) : topCustomers;
 
   const expenseByCategory = useMemo(() => {
     const map = new Map<string, number>();
@@ -180,17 +191,35 @@ export default function Reports() {
   }, [periodExpenses]);
   const expenseTotal = periodExpenses.reduce((sum, e) => sum + e.amount, 0);
 
-  const topVendors = useMemo(() => {
+  // Displayed variant: when searching, keep only expenses whose category or
+  // description matches, then group those by category.
+  const shownExpenseByCategory = useMemo(() => {
+    if (!query) return expenseByCategory;
     const map = new Map<string, number>();
-    periodExpenses.forEach((e) => {
-      if (!e.vendorId) return;
-      map.set(e.vendorId, (map.get(e.vendorId) ?? 0) + e.amount);
-    });
+    periodExpenses
+      .filter((e) => e.category.toLowerCase().includes(query) || e.description.toLowerCase().includes(query))
+      .forEach((e) => map.set(e.category, (map.get(e.category) ?? 0) + e.amount));
+    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
+  }, [query, expenseByCategory, periodExpenses]);
+  const shownExpenseTotal = shownExpenseByCategory.reduce((sum, [, amount]) => sum + amount, 0);
+
+  // Vendor purchases live in vendorPurchases (the priced/locked purchases
+  // view), NOT in `expenses` — that list only holds general, non-vendor
+  // costs, so ranking vendors off it could never produce a result. Rank by
+  // the total purchased from each vendor within the selected period.
+  const periodVendorPurchases = useMemo(
+    () => vendorPurchases.filter((v) => v.date >= start && (!end || v.date <= end)),
+    [vendorPurchases, start, end]
+  );
+  const vendorRanking = useMemo(() => {
+    const map = new Map<string, number>();
+    periodVendorPurchases.forEach((v) => map.set(v.vendorId, (map.get(v.vendorId) ?? 0) + v.amount));
     return Array.from(map.entries())
-      .map(([id, amount]) => ({ name: vendors.find((v) => v.id === id)?.name ?? '—', amount }))
-      .sort((a, b) => b.amount - a.amount)
-      .slice(0, 5);
-  }, [periodExpenses, vendors]);
+      .map(([id, amount]) => ({ id, name: vendors.find((v) => v.id === id)?.name ?? '—', amount }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [periodVendorPurchases, vendors]);
+  const topVendors = useMemo(() => vendorRanking.slice(0, 5), [vendorRanking]);
+  const shownVendors = query ? vendorRanking.filter((v) => matches(v.name)) : topVendors;
 
   const quotationSummary = useMemo(() => {
     const pending = periodQuotations.filter((q) => q.status === 'pending');
@@ -241,8 +270,12 @@ export default function Reports() {
 
   const totalReceivable = customers.reduce((sum, c) => sum + c.outstanding, 0);
   const totalPayable = vendors.reduce((sum, v) => sum + v.payable, 0);
-  const receivables = customers.filter((c) => c.outstanding > 0).map((c) => ({ name: c.name, amount: c.outstanding }));
-  const payables = vendors.filter((v) => v.payable > 0).map((v) => ({ name: v.name, amount: v.payable }));
+  const receivables = customers.filter((c) => c.outstanding > 0).map((c) => ({ id: c.id, name: c.name, amount: c.outstanding }));
+  const payables = vendors.filter((v) => v.payable > 0).map((v) => ({ id: v.id, name: v.name, amount: v.payable }));
+  const shownReceivables = receivables.filter((r) => matches(r.name));
+  const shownPayables = payables.filter((p) => matches(p.name));
+  const shownReceivableTotal = shownReceivables.reduce((sum, r) => sum + r.amount, 0);
+  const shownPayableTotal = shownPayables.reduce((sum, p) => sum + p.amount, 0);
 
   const handleExport = () => {
     exportReportsSnapshot({
@@ -288,6 +321,25 @@ export default function Reports() {
           <button className="btn btn-primary btn-small" onClick={handleExport}>
             Export Report (Excel)
           </button>
+        </div>
+
+        <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <input
+            type="text"
+            className="search-input"
+            style={{ flex: '1 1 280px', maxWidth: 420 }}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search customers, vendors, expense categories or descriptions…"
+          />
+          {query && (
+            <>
+              <button className="btn btn-ghost btn-small" onClick={() => setSearch('')}>
+                Clear
+              </button>
+              <span className="row-sub">Filtering the customer, vendor and expense lists below. Totals and export are unchanged.</span>
+            </>
+          )}
         </div>
 
         {period === 'custom' && (
@@ -411,15 +463,15 @@ export default function Reports() {
             <div className="table-scroll">
               <table>
               <tbody>
-                {topCustomers.map((c) => (
-                  <tr key={c.name}>
+                {shownCustomers.map((c) => (
+                  <tr key={c.id}>
                     <td>{c.name}</td>
                     <td className="num">{formatINR(c.amount)}</td>
                   </tr>
                 ))}
-                {topCustomers.length === 0 && (
+                {shownCustomers.length === 0 && (
                   <tr>
-                    <td className="row-sub">No quotations in this period.</td>
+                    <td className="row-sub">{query ? 'No matching customers in this period.' : 'No quotations in this period.'}</td>
                   </tr>
                 )}
               </tbody>
@@ -436,7 +488,7 @@ export default function Reports() {
             <div className="table-scroll">
               <table>
               <tbody>
-                {expenseByCategory.map(([category, amount]) => (
+                {shownExpenseByCategory.map(([category, amount]) => (
                   <tr key={category}>
                     <td>{category}</td>
                     <td className="num">{formatINR(amount)}</td>
@@ -445,9 +497,16 @@ export default function Reports() {
                     </td>
                   </tr>
                 ))}
-                {expenseByCategory.length === 0 && (
+                {shownExpenseByCategory.length === 0 && (
                   <tr>
-                    <td className="row-sub">No expenses in this period.</td>
+                    <td className="row-sub">{query ? 'No matching expenses in this period.' : 'No expenses in this period.'}</td>
+                  </tr>
+                )}
+                {query && shownExpenseByCategory.length > 0 && (
+                  <tr>
+                    <td className="row-name">Matching total</td>
+                    <td className="num row-name">{formatINR(shownExpenseTotal)}</td>
+                    <td></td>
                   </tr>
                 )}
               </tbody>
@@ -462,15 +521,15 @@ export default function Reports() {
             <div className="table-scroll">
               <table>
               <tbody>
-                {topVendors.map((v) => (
-                  <tr key={v.name}>
+                {shownVendors.map((v) => (
+                  <tr key={v.id}>
                     <td>{v.name}</td>
                     <td className="num">{formatINR(v.amount)}</td>
                   </tr>
                 ))}
-                {topVendors.length === 0 && (
+                {shownVendors.length === 0 && (
                   <tr>
-                    <td className="row-sub">No vendor purchases in this period.</td>
+                    <td className="row-sub">{query ? 'No matching vendors in this period.' : 'No vendor purchases in this period.'}</td>
                   </tr>
                 )}
               </tbody>
@@ -559,15 +618,20 @@ export default function Reports() {
             <div className="table-scroll">
               <table>
               <tbody>
-                {customers.filter((c) => c.outstanding > 0).map((c) => (
-                  <tr key={c.id}>
-                    <td>{c.name}</td>
-                    <td className="num" style={{ color: 'var(--warning)' }}>{formatINR(c.outstanding)}</td>
+                {shownReceivables.map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.name}</td>
+                    <td className="num" style={{ color: 'var(--warning)' }}>{formatINR(r.amount)}</td>
                   </tr>
                 ))}
+                {query && shownReceivables.length === 0 && (
+                  <tr>
+                    <td className="row-sub">No matching customers with a balance.</td>
+                  </tr>
+                )}
                 <tr>
-                  <td className="row-name">Total</td>
-                  <td className="num row-name">{formatINR(totalReceivable)}</td>
+                  <td className="row-name">{query ? 'Total (matching)' : 'Total'}</td>
+                  <td className="num row-name">{formatINR(query ? shownReceivableTotal : totalReceivable)}</td>
                 </tr>
               </tbody>
             </table>
@@ -582,15 +646,20 @@ export default function Reports() {
             <div className="table-scroll">
               <table>
               <tbody>
-                {vendors.filter((v) => v.payable > 0).map((v) => (
-                  <tr key={v.id}>
-                    <td>{v.name}</td>
-                    <td className="num" style={{ color: 'var(--warning)' }}>{formatINR(v.payable)}</td>
+                {shownPayables.map((p) => (
+                  <tr key={p.id}>
+                    <td>{p.name}</td>
+                    <td className="num" style={{ color: 'var(--warning)' }}>{formatINR(p.amount)}</td>
                   </tr>
                 ))}
+                {query && shownPayables.length === 0 && (
+                  <tr>
+                    <td className="row-sub">No matching vendors with a balance.</td>
+                  </tr>
+                )}
                 <tr>
-                  <td className="row-name">Total</td>
-                  <td className="num row-name">{formatINR(totalPayable)}</td>
+                  <td className="row-name">{query ? 'Total (matching)' : 'Total'}</td>
+                  <td className="num row-name">{formatINR(query ? shownPayableTotal : totalPayable)}</td>
                 </tr>
               </tbody>
             </table>

@@ -202,8 +202,17 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
 }
 
 export default function Expenses() {
-  const { expenses, vendorPurchases, vendors, workers, workerAdvances, workerPayments, openExpenseModal, openWorkerModal } =
-    useApp();
+  const {
+    expenses,
+    vendorPurchases,
+    vendors,
+    workers,
+    workerAdvances,
+    workerPayments,
+    openExpenseModal,
+    openEditExpenseModal,
+    openWorkerModal,
+  } = useApp();
   const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
   const selectedWorker = workers.find((w) => w.id === selectedWorkerId) ?? null;
 
@@ -242,6 +251,7 @@ export default function Expenses() {
                 <th>Category</th>
                 <th>Description</th>
                 <th>Amount</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -252,8 +262,6 @@ export default function Expenses() {
               )}
               {expenses.map((e) => (
                 <tr key={e.id}>
-                  <td className="card-main">{e.description}</td>
-                  <td className="num card-amount">{formatINR(e.amount)}</td>
                   <td className="row-sub card-meta">
                     <span className="mobile-label">Date</span>
                     {e.date}
@@ -261,6 +269,19 @@ export default function Expenses() {
                   <td className="row-sub card-meta">
                     <span className="mobile-label">Category</span>
                     {e.category}
+                  </td>
+                  <td className="card-main">{e.description}</td>
+                  <td className="num card-amount">{formatINR(e.amount)}</td>
+                  <td className="card-actions desktop-only">
+                    {/* Payroll rows are written by worker advances / settlements;
+                        editing them here would desync the worker ledger. */}
+                    {e.category === 'Payslips & Wages' ? (
+                      <span className="row-sub">Via worker ledger</span>
+                    ) : (
+                      <button className="btn btn-ghost btn-small" onClick={() => openEditExpenseModal(e.id)}>
+                        Edit
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

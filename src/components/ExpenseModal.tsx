@@ -14,7 +14,8 @@ const CATEGORIES: ExpenseCategory[] = [
 ];
 
 export default function ExpenseModal() {
-  const { isExpenseModalOpen, closeExpenseModal, addExpense } = useApp();
+  const { isExpenseModalOpen, closeExpenseModal, addExpense, updateExpense, editingExpenseId, expenses } = useApp();
+  const editing = editingExpenseId ? expenses.find((e) => e.id === editingExpenseId) ?? null : null;
 
   const [category, setCategory] = useState<ExpenseCategory>('Rent');
   const [description, setDescription] = useState('');
@@ -22,13 +23,22 @@ export default function ExpenseModal() {
   const [date, setDate] = useState('');
 
   useEffect(() => {
-    if (isExpenseModalOpen) {
+    if (!isExpenseModalOpen) return;
+    if (editing) {
+      setCategory(editing.category);
+      setDescription(editing.description);
+      setAmount(String(editing.amount));
+      setDate(editing.date);
+    } else {
       setCategory('Rent');
       setDescription('');
       setAmount('');
       setDate(new Date().toISOString().slice(0, 10));
     }
-  }, [isExpenseModalOpen]);
+    // Only re-seed when the modal opens or the target changes — not on every
+    // expenses refresh, which would wipe what the user is typing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isExpenseModalOpen, editingExpenseId]);
 
   if (!isExpenseModalOpen) return null;
 
@@ -36,7 +46,11 @@ export default function ExpenseModal() {
 
   const handleSave = () => {
     if (!description || amountNum <= 0 || !date) return;
-    addExpense({ category, description, amount: amountNum, date });
+    if (editing) {
+      updateExpense(editing.id, { category, description, amount: amountNum, date });
+    } else {
+      addExpense({ category, description, amount: amountNum, date });
+    }
     closeExpenseModal();
   };
 
@@ -44,7 +58,7 @@ export default function ExpenseModal() {
     <div className="modal-overlay is-open">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <h2>Record Expense</h2>
+          <h2>{editing ? 'Edit Expense' : 'Record Expense'}</h2>
           <button className="modal-close" onClick={closeExpenseModal}>
             &times;
           </button>
@@ -55,7 +69,7 @@ export default function ExpenseModal() {
             <div className="form-field">
               <label>Category</label>
               <select value={category} onChange={(e) => setCategory(e.target.value as ExpenseCategory)}>
-                {CATEGORIES.filter((c) => c !== 'Raw Material').map((c) => (
+                {CATEGORIES.filter((c) => c !== 'Raw Material' || editing?.category === 'Raw Material').map((c) => (
                   <option key={c} value={c}>
                     {c}
                   </option>
@@ -93,7 +107,7 @@ export default function ExpenseModal() {
             Cancel
           </button>
           <button className="btn btn-primary" onClick={handleSave}>
-            Save expense
+            {editing ? 'Save changes' : 'Save expense'}
           </button>
         </div>
       </div>

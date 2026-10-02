@@ -206,6 +206,7 @@ interface AppContextValue {
 
   expenses: Expense[];
   addExpense: (input: NewExpenseInput) => Promise<void>;
+  updateExpense: (id: string, input: NewExpenseInput) => Promise<void>;
 
   vendorPurchases: VendorPurchase[];
   vendorPayments: VendorPayment[];
@@ -274,7 +275,9 @@ interface AppContextValue {
   closeVendorModal: () => void;
 
   isExpenseModalOpen: boolean;
+  editingExpenseId: string | null;
   openExpenseModal: () => void;
+  openEditExpenseModal: (id: string) => void;
   closeExpenseModal: () => void;
 
   isQuotationModalOpen: boolean;
@@ -373,6 +376,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isVendorModalOpen, setVendorModalOpen] = useState(false);
   const [editingVendorId, setEditingVendorId] = useState<string | null>(null);
   const [isExpenseModalOpen, setExpenseModalOpen] = useState(false);
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [isQuotationModalOpen, setQuotationModalOpen] = useState(false);
   const [quotationModalCustomerId, setQuotationModalCustomerId] = useState<string | null>(null);
   const [editingQuotationId, setEditingQuotationId] = useState<string | null>(null);
@@ -816,6 +820,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       .single();
     if (error || !data) return;
     setExpenses((prev) => [mapExpense(data), ...prev]);
+  };
+
+  // Edits a general (non-vendor) expense in place. Scoped to vendor_id IS NULL
+  // so this can never touch a vendor purchase by accident. The monthly
+  // revenue/expense view is re-read afterwards because changing an amount or
+  // date moves the numbers on the Dashboard and Reports.
+  const updateExpense = async (id: string, input: NewExpenseInput) => {
+    const { data, error } = await supabase
+      .from('expenses')
+      .update({
+        category: input.category,
+        description: input.description,
+        amount: input.amount,
+        expense_date: input.date,
+      })
+      .eq('id', id)
+      .is('vendor_id', null)
+      .select()
+      .single();
+    if (error || !data) return;
+    setExpenses((prev) => prev.map((e) => (e.id === id ? mapExpense(data) : e)));
+    const { data: monthly } = await supabase.from('monthly_revenue_expense').select('*');
+    if (monthly) setMonthlyFigures(monthly.map(mapMonthlyFigure));
   };
 
   // ---------- Vendor purchases ----------
@@ -1370,6 +1397,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       updateVendor: guardMobile(updateVendor, isMobileView),
       expenses,
       addExpense: guardMobile(addExpense, isMobileView),
+      updateExpense: guardMobile(updateExpense, isMobileView),
       vendorPurchases,
       vendorPayments,
       addVendorPurchase: guardMobile(addVendorPurchase, isMobileView),
@@ -1434,8 +1462,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setEditingVendorId(null);
       },
       isExpenseModalOpen,
-      openExpenseModal: () => setExpenseModalOpen(true),
-      closeExpenseModal: () => setExpenseModalOpen(false),
+      editingExpenseId,
+      openExpenseModal: () => {
+        setEditingExpenseId(null);
+        setExpenseModalOpen(true);
+      },
+      openEditExpenseModal: (id: string) => {
+        setEditingExpenseId(id);
+        setExpenseModalOpen(true);
+      },
+      closeExpenseModal: () => {
+        setExpenseModalOpen(false);
+        setEditingExpenseId(null);
+      },
       isQuotationModalOpen,
       quotationModalCustomerId,
       editingQuotationId,
@@ -1525,6 +1564,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       isVendorModalOpen,
       editingVendorId,
       isExpenseModalOpen,
+      editingExpenseId,
       isQuotationModalOpen,
       quotationModalCustomerId,
       editingQuotationId,
