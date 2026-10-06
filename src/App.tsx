@@ -9,6 +9,7 @@ import InventorySidebar from './components/InventorySidebar';
 import InventoryMobileNav from './components/InventoryMobileNav';
 import QuotationModal from './components/QuotationModal';
 import PrintableDocument from './components/PrintableDocument';
+import ToastHost from './components/Toast';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Invoicing from './pages/Invoicing';
@@ -20,6 +21,7 @@ import Expenses from './pages/Expenses';
 import Reports from './pages/Reports';
 import Links from './pages/Links';
 import EmployeeControl from './pages/EmployeeControl';
+import ActivityLog from './pages/ActivityLog';
 import CategoriesStock from './pages/inventory/CategoriesStock';
 import WasteLedger from './pages/inventory/WasteLedger';
 import CuttingPlan from './pages/inventory/CuttingPlan';
@@ -59,6 +61,7 @@ function ProtectedShell() {
             <Route path="/reports" element={<Reports />} />
             <Route path="/links" element={<Links />} />
             <Route path="/employees" element={<EmployeeControl />} />
+            <Route path="/activity-log" element={<ActivityLog />} />
           </Routes>
         )}
       </main>
@@ -115,6 +118,7 @@ export default function App() {
 
   return (
     <AppProvider>
+      <ToastHost />
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/inventory/*" element={<InventoryShell />} />

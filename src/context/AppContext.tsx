@@ -33,6 +33,7 @@ import type {
 import { SLAB_DISCOUNT_PERCENT } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import { guardMobile } from '../lib/mobileGuard';
+import { glassLine, simpleLine, quotationTotals } from '../lib/quotationMath';
 import { useIsMobile } from '../hooks/useIsMobile';
 import {
   mapCustomerBalance,
@@ -146,6 +147,7 @@ interface NewQuotationInput {
   slab: InvoiceSlab;
   discountPercent: number; // only meaningful when slab === 'A'; otherwise derived from SLAB_DISCOUNT_PERCENT
   transportation: number;
+  gstEnabled?: boolean; // defaults to the global GST switch when omitted
   items: NewQuotationItemInput[];
 }
 
@@ -154,6 +156,7 @@ interface EditQuotationInput {
   slab: InvoiceSlab;
   discountPercent: number;
   transportation: number;
+  gstEnabled: boolean; // the quotation's own GST state, confirmed in the edit modal
   items: NewQuotationItemInput[];
 }
 
@@ -190,32 +193,42 @@ export interface PaymentReceipt {
   quotation: Quotation;
 }
 
+export type ToastKind = 'error' | 'success' | 'info';
+export interface Toast {
+  id: number;
+  message: string;
+  kind: ToastKind;
+}
+
 export type PrintTarget = { kind: 'invoice' | 'quotation' | 'ledger' | 'slip'; id: string } | null;
 
 interface AppContextValue {
   gstEnabled: boolean;
   toggleGst: () => void;
 
+  toast: Toast | null;
+  showToast: (message: string, kind?: ToastKind) => void;
+  dismissToast: () => void;
+
   customers: Customer[];
   addCustomer: (input: NewCustomerInput) => Promise<Customer | null>;
-  updateCustomer: (id: string, input: NewCustomerInput) => Promise<void>;
+  updateCustomer: (id: string, input: NewCustomerInput) => Promise<boolean>;
 
   vendors: Vendor[];
   addVendor: (input: NewVendorInput) => Promise<Vendor | null>;
-  updateVendor: (id: string, input: NewVendorInput) => Promise<void>;
+  updateVendor: (id: string, input: NewVendorInput) => Promise<boolean>;
 
   expenses: Expense[];
-  addExpense: (input: NewExpenseInput) => Promise<void>;
-  updateExpense: (id: string, input: NewExpenseInput) => Promise<void>;
+  addExpense: (input: NewExpenseInput) => Promise<boolean>;
 
   vendorPurchases: VendorPurchase[];
   vendorPayments: VendorPayment[];
-  addVendorPurchase: (input: NewVendorPurchaseInput) => Promise<void>;
-  recordVendorPayment: (vendorId: string, amount: number, note?: string) => Promise<void>;
+  addVendorPurchase: (input: NewVendorPurchaseInput) => Promise<boolean>;
+  recordVendorPayment: (vendorId: string, amount: number, note?: string) => Promise<boolean>;
 
   vendorSlips: VendorSlip[];
   addVendorSlip: (input: NewVendorSlipInput) => Promise<VendorSlip | null>;
-  priceVendorSlip: (slipId: string, itemRates: { itemId: string; rate: number }[]) => Promise<void>;
+  priceVendorSlip: (slipId: string, itemRates: { itemId: string; rate: number }[]) => Promise<boolean>;
 
   purchaseBills: PurchaseBill[];
   addPurchaseBill: (input: NewPurchaseBillInput) => Promise<PurchaseBill | null>;
@@ -230,13 +243,13 @@ interface AppContextValue {
 
   quotations: Quotation[];
   addQuotation: (input: NewQuotationInput) => Promise<Quotation | null>;
-  updateQuotation: (quotationDbId: string, input: EditQuotationInput) => Promise<void>;
+  updateQuotation: (quotationDbId: string, input: EditQuotationInput) => Promise<boolean>;
   fetchQuotationItems: (quotationDbId: string) => Promise<NewQuotationItemInput[]>;
   fetchQuotationItemsForPrint: (quotationDbId: string) => Promise<QuotationItem[]>;
   // Only succeeds once the quotation's balanceAmount has reached zero —
   // enforced again server-side by the RPC regardless of what the UI shows.
   convertQuotationToInvoice: (quotationDbId: string) => Promise<Invoice | null>;
-  deleteQuotation: (quotationDbId: string) => Promise<void>;
+  deleteQuotation: (quotationDbId: string) => Promise<boolean>;
 
   quotationPayments: QuotationPayment[];
   recordQuotationPayment: (
@@ -247,20 +260,20 @@ interface AppContextValue {
   ) => Promise<PaymentReceipt | null>;
 
   workers: Worker[];
-  addWorker: (input: NewWorkerInput) => Promise<void>;
-  updateWorker: (workerId: string, input: NewWorkerInput) => Promise<void>;
+  addWorker: (input: NewWorkerInput) => Promise<boolean>;
+  updateWorker: (workerId: string, input: NewWorkerInput) => Promise<boolean>;
   workerAdvances: WorkerAdvance[];
-  logWorkerAdvance: (input: NewWorkerAdvanceInput) => Promise<void>;
+  logWorkerAdvance: (input: NewWorkerAdvanceInput) => Promise<boolean>;
   workerPayments: WorkerPayment[];
-  recordWorkerPayment: (workerId: string, amount: number, date: string, forMonth: string, note?: string) => Promise<void>;
+  recordWorkerPayment: (workerId: string, amount: number, date: string, forMonth: string, note?: string) => Promise<boolean>;
 
   links: ImportantLink[];
-  addLink: (input: NewLinkInput) => Promise<void>;
+  addLink: (input: NewLinkInput) => Promise<boolean>;
 
   priceList: PriceListItem[];
-  addPriceListItem: (input: NewPriceListItemInput) => Promise<void>;
-  updatePriceListItem: (id: string, input: NewPriceListItemInput) => Promise<void>;
-  deletePriceListItem: (id: string) => Promise<void>;
+  addPriceListItem: (input: NewPriceListItemInput) => Promise<boolean>;
+  updatePriceListItem: (id: string, input: NewPriceListItemInput) => Promise<boolean>;
+  deletePriceListItem: (id: string) => Promise<boolean>;
 
   isCustomerModalOpen: boolean;
   editingCustomerId: string | null;
@@ -275,9 +288,7 @@ interface AppContextValue {
   closeVendorModal: () => void;
 
   isExpenseModalOpen: boolean;
-  editingExpenseId: string | null;
   openExpenseModal: () => void;
-  openEditExpenseModal: (id: string) => void;
   closeExpenseModal: () => void;
 
   isQuotationModalOpen: boolean;
@@ -355,6 +366,17 @@ const EMPTY_SUMMARY: DashboardSummary = { customersPaidThisMonth: 0, quotationsA
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [gstEnabled, setGstEnabled] = useState(false);
+  const [toast, setToast] = useState<Toast | null>(null);
+  const showToast = useCallback((message: string, kind: ToastKind = 'info') => {
+    setToast({ id: Date.now(), message, kind });
+  }, []);
+  const dismissToast = useCallback(() => setToast(null), []);
+  // Every failed write reports through here: the real error goes to the
+  // console for debugging and a readable message to the user.
+  const reportError = (action: string, error?: { message?: string } | null) => {
+    console.error(`[${action}]`, error);
+    showToast(`${action} failed${error?.message ? `: ${error.message}` : '.'}`, 'error');
+  };
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -376,7 +398,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isVendorModalOpen, setVendorModalOpen] = useState(false);
   const [editingVendorId, setEditingVendorId] = useState<string | null>(null);
   const [isExpenseModalOpen, setExpenseModalOpen] = useState(false);
-  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [isQuotationModalOpen, setQuotationModalOpen] = useState(false);
   const [quotationModalCustomerId, setQuotationModalCustomerId] = useState<string | null>(null);
   const [editingQuotationId, setEditingQuotationId] = useState<string | null>(null);
@@ -544,6 +565,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       supabase.from('purchase_bill_items').select('*').order('sort_order'),
     ]);
 
+    // Surface partial load failures instead of silently showing empty lists.
+    const failedLoads = [
+      settingsRes, customersRes, vendorsRes, invoicesRes, itemsRes, quotationsRes, quotationPaymentsRes, expensesRes,
+      vendorPurchasesRes, vendorPaymentsRes, monthlyRes, workersRes, workerAdvancesRes, workerPaymentsRes, linksRes,
+      summaryRes, priceListRes, vendorSlipsRes, vendorSlipItemsRes, purchaseBillsRes, purchaseBillItemsRes,
+    ].filter((r) => r.error);
+    if (failedLoads.length > 0) {
+      console.error('[loadAllData] failed requests:', failedLoads.map((r) => r.error));
+      showToast(`Some data could not be loaded (${failedLoads.length} request${failedLoads.length > 1 ? 's' : ''} failed). Refresh to retry.`, 'error');
+    }
+
     if (settingsRes.data) setGstEnabled(settingsRes.data.gst_enabled);
     if (customersRes.data) setCustomers(customersRes.data.map(mapCustomerBalance));
     if (vendorsRes.data) setVendors(vendorsRes.data.map(mapVendorBalance));
@@ -593,7 +625,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     setDataLoading(false);
     setHasLoadedOnce(true);
-  }, []);
+  }, [showToast]);
 
   // ---------- Auth bootstrap ----------
   useEffect(() => {
@@ -743,7 +775,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const next = !gstEnabled;
     setGstEnabled(next);
     const { error } = await supabase.from('business_settings').update({ gst_enabled: next }).eq('id', true);
-    if (error) setGstEnabled(!next);
+    if (error) {
+      setGstEnabled(!next);
+      reportError('Changing GST setting', error);
+    }
   };
 
   // ---------- Customers / Vendors ----------
@@ -753,7 +788,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       .insert({ name: input.name, contact: input.contact || null, address: input.address || null, gstin: input.gstin || null })
       .select()
       .single();
-    if (error || !data) return null;
+    if (error || !data) {
+      reportError('Saving customer', error);
+      return null;
+    }
     const newCustomer: Customer = {
       id: data.id,
       name: data.name,
@@ -773,7 +811,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       .insert({ name: input.name, category: input.category, contact: input.contact })
       .select()
       .single();
-    if (error || !data) return null;
+    if (error || !data) {
+      reportError('Saving vendor', error);
+      return null;
+    }
     const newVendor: Vendor = {
       id: data.id,
       name: data.name,
@@ -786,26 +827,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return newVendor;
   };
 
-  const updateCustomer = async (id: string, input: NewCustomerInput) => {
+  const updateCustomer = async (id: string, input: NewCustomerInput): Promise<boolean> => {
     const { error } = await supabase
       .from('customers')
       .update({ name: input.name, contact: input.contact || null, address: input.address || null, gstin: input.gstin || null })
       .eq('id', id);
-    if (error) return;
+    if (error) {
+      reportError('Updating customer', error);
+      return false;
+    }
     await refreshCustomers();
+    return true;
   };
 
-  const updateVendor = async (id: string, input: NewVendorInput) => {
+  const updateVendor = async (id: string, input: NewVendorInput): Promise<boolean> => {
     const { error } = await supabase
       .from('vendors')
       .update({ name: input.name, category: input.category, contact: input.contact })
       .eq('id', id);
-    if (error) return;
+    if (error) {
+      reportError('Updating vendor', error);
+      return false;
+    }
     await refreshVendors();
+    return true;
   };
 
   // ---------- Expenses (non-vendor only) ----------
-  const addExpense = async (input: NewExpenseInput) => {
+  const addExpense = async (input: NewExpenseInput): Promise<boolean> => {
     const { data, error } = await supabase
       .from('expenses')
       .insert({
@@ -818,35 +867,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       })
       .select()
       .single();
-    if (error || !data) return;
+    if (error || !data) {
+      reportError('Saving expense', error);
+      return false;
+    }
     setExpenses((prev) => [mapExpense(data), ...prev]);
-  };
-
-  // Edits a general (non-vendor) expense in place. Scoped to vendor_id IS NULL
-  // so this can never touch a vendor purchase by accident. The monthly
-  // revenue/expense view is re-read afterwards because changing an amount or
-  // date moves the numbers on the Dashboard and Reports.
-  const updateExpense = async (id: string, input: NewExpenseInput) => {
-    const { data, error } = await supabase
-      .from('expenses')
-      .update({
-        category: input.category,
-        description: input.description,
-        amount: input.amount,
-        expense_date: input.date,
-      })
-      .eq('id', id)
-      .is('vendor_id', null)
-      .select()
-      .single();
-    if (error || !data) return;
-    setExpenses((prev) => prev.map((e) => (e.id === id ? mapExpense(data) : e)));
-    const { data: monthly } = await supabase.from('monthly_revenue_expense').select('*');
-    if (monthly) setMonthlyFigures(monthly.map(mapMonthlyFigure));
+    return true;
   };
 
   // ---------- Vendor purchases ----------
-  const addVendorPurchase = async (input: NewVendorPurchaseInput) => {
+  const addVendorPurchase = async (input: NewVendorPurchaseInput): Promise<boolean> => {
     const { data, error } = await supabase
       .from('expenses')
       .insert({
@@ -859,7 +889,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       })
       .select()
       .single();
-    if (error || !data) return;
+    if (error || !data) {
+      reportError('Saving purchase', error);
+      return false;
+    }
     setVendorPurchases((prev) => [
       {
         id: data.id,
@@ -875,19 +908,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ...prev,
     ]);
     await refreshVendors();
+    return true;
   };
 
   // Pays down a vendor's total payable in one shot — the RPC allocates the
   // amount across that vendor's outstanding purchases oldest-first, so
   // individual purchase/slip statuses still update correctly underneath.
-  const recordVendorPayment = async (vendorId: string, amount: number, note?: string) => {
+  const recordVendorPayment = async (vendorId: string, amount: number, note?: string): Promise<boolean> => {
     const { error } = await supabase.rpc('record_vendor_payment', {
       p_vendor_id: vendorId,
       p_amount: amount,
       p_note: note || null,
     });
-    if (error) return;
+    if (error) {
+      reportError('Recording vendor payment', error);
+      return false;
+    }
     await Promise.all([refreshVendorPurchases(), refreshVendors(), refreshVendorPayments()]);
+    return true;
   };
 
   // ---------- Vendor slips (DC) ----------
@@ -904,7 +942,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       .insert({ vendor_id: input.vendorId, care_of: input.careOf, customer_name: input.customerName?.trim() || null })
       .select()
       .single();
-    if (slipErr || !slipRow) return null;
+    if (slipErr || !slipRow) {
+      reportError('Saving slip', slipErr);
+      return null;
+    }
 
     const itemRows = input.items.map((it, idx) => ({
       slip_id: slipRow.id,
@@ -917,6 +958,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const { error: itemsErr } = await supabase.from('vendor_slip_items').insert(itemRows);
     if (itemsErr) {
       await supabase.from('vendor_slips').delete().eq('id', slipRow.id);
+      reportError('Saving slip items', itemsErr);
       return null;
     }
 
@@ -934,13 +976,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // expense row, and locks it — all atomically via the RPC. Once this
   // resolves the slip behaves like any other vendor purchase (payable,
   // Record Payment, etc.) via refreshVendorPurchases/refreshVendors.
-  const priceVendorSlip = async (slipId: string, itemRates: { itemId: string; rate: number }[]) => {
+  const priceVendorSlip = async (slipId: string, itemRates: { itemId: string; rate: number }[]): Promise<boolean> => {
     const { error } = await supabase.rpc('price_vendor_slip', {
       p_slip_id: slipId,
       p_items: itemRates.map((r) => ({ id: r.itemId, rate: r.rate })),
     });
-    if (error) return;
+    if (error) {
+      reportError('Saving slip prices', error);
+      return false;
+    }
     await Promise.all([refreshVendorSlips(), refreshVendorPurchases(), refreshVendors()]);
+    return true;
   };
 
   // ---------- Purchase bills (GST purchase register) ----------
@@ -984,7 +1030,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       })
       .select()
       .single();
-    if (billErr || !billRow) return null;
+    if (billErr || !billRow) {
+      reportError('Saving purchase bill', billErr);
+      return null;
+    }
 
     const itemRows = computedItems.map((it, idx) => ({
       bill_id: billRow.id,
@@ -1003,6 +1052,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const { error: itemsErr } = await supabase.from('purchase_bill_items').insert(itemRows);
     if (itemsErr) {
       await supabase.from('purchase_bills').delete().eq('id', billRow.id);
+      reportError('Saving purchase bill items', itemsErr);
       return null;
     }
 
@@ -1015,12 +1065,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setPurchaseBills((prev) => [newBill, ...prev]);
     return newBill;
   };
-
-  // Glass is billed in 6-inch increments — any entered length/width rounds
-  // UP to the next multiple of 6, never to the nearest one (46in bills as
-  // 48in, not 45in). This is the billed dimension, so it's what gets
-  // stored on the item row too, not the raw typed value.
-  const roundUpTo6 = (n: number) => (n > 0 ? Math.ceil(n / 6) * 6 : 0);
 
   // ---------- Invoices ----------
   // Undoes a conversion: hard-deletes the invoice (and its items, via
@@ -1041,27 +1085,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   // ---------- Quotations ----------
-  // Reuses the same roundUpTo6 defined above (invoices section) — must
-  // match the client-side preview exactly, or the modal's live total would
-  // disagree with what actually gets saved.
-  function computeQuotationItemAmount(i: NewQuotationItemInput) {
-    if (i.type === 'glass') {
-      const len = roundUpTo6(i.lengthIn);
-      const wid = roundUpTo6(i.widthIn);
-      const sft = Math.round(((len * wid) / 144) * i.qty * 100) / 100;
-      const workGlass = Math.round(sft * i.ratePerSft * 100) / 100;
-      const rft = Math.round(((2 * (len + wid)) / 12) * i.qty * 100) / 100;
-      const polishAmt = Math.round(rft * (i.polishRate || 0) * 100) / 100;
-      const fixingAmt = Math.round(sft * (i.fixingRatePerSft || 0) * 100) / 100;
-      return { sft, workGlass, rft, polishAmt, fixingAmt, amount: workGlass + polishAmt + fixingAmt };
-    }
-    return { amount: Math.round(i.quantity * i.rate * 100) / 100 };
+  // All arithmetic lives in lib/quotationMath.ts, shared with
+  // QuotationModal so the live preview always equals what gets saved.
+  function quotationLineAmount(i: NewQuotationItemInput): number {
+    return i.type === 'glass' ? glassLine(i).amount : simpleLine(i.quantity, i.rate).amount;
   }
 
   function buildQuotationItemRows(quotationId: string, items: NewQuotationItemInput[]) {
     return items.map((i, idx) => {
-      const c = computeQuotationItemAmount(i);
       if (i.type === 'glass') {
+        const c = glassLine(i);
         return {
           quotation_id: quotationId,
           item_type: 'glass',
@@ -1083,6 +1116,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           amount: c.amount,
         };
       }
+      const s = simpleLine(i.quantity, i.rate);
       return {
         quotation_id: quotationId,
         item_type: 'simple',
@@ -1091,7 +1125,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         sort_order: idx,
         quantity: i.quantity,
         rate: i.rate,
-        amount: c.amount,
+        amount: s.amount,
       };
     });
   }
@@ -1136,12 +1170,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const addQuotation = async (input: NewQuotationInput): Promise<Quotation | null> => {
-    const subtotal = input.items.reduce((sum, i) => sum + computeQuotationItemAmount(i).amount, 0);
-    if (subtotal <= 0) return null;
+    const subtotal = input.items.reduce((sum, i) => sum + quotationLineAmount(i), 0);
+    if (subtotal <= 0) {
+      showToast('A quotation needs at least one priced item.', 'error');
+      return null;
+    }
     const discountPercent = input.slab === 'A' ? input.discountPercent || 0 : SLAB_DISCOUNT_PERCENT[input.slab];
-    const discountAmount = Math.round(subtotal * (discountPercent / 100) * 100) / 100;
-    const taxableValue = subtotal - discountAmount;
-    const gst = gstEnabled ? Math.round(taxableValue * 0.18 * 100) / 100 : 0;
+    const totals = quotationTotals(subtotal, discountPercent, input.gstEnabled ?? gstEnabled, input.transportation);
     const summary = input.items.slice(0, 3).map((i) => i.description).join(', ') || 'Quotation';
 
     const { data: qRow, error: qErr } = await supabase
@@ -1149,22 +1184,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       .insert({
         customer_id: input.customerId,
         description: summary,
-        amount: subtotal,
+        amount: totals.subtotal,
         slab: input.slab,
         discount_percent: discountPercent,
-        discount_amount: discountAmount,
-        gst,
+        discount_amount: totals.discountAmount,
+        gst: totals.gst,
         transportation: input.transportation || 0,
         valid_until: input.validUntil,
       })
       .select()
       .single();
-    if (qErr || !qRow) return null;
+    if (qErr || !qRow) {
+      reportError('Saving quotation', qErr);
+      return null;
+    }
 
     const itemRows = buildQuotationItemRows(qRow.id, input.items);
     const { error: itemsErr } = await supabase.from('quotation_items').insert(itemRows);
     if (itemsErr) {
       await supabase.from('quotations').delete().eq('id', qRow.id);
+      reportError('Saving quotation items', itemsErr);
       return null;
     }
 
@@ -1177,39 +1216,131 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return newQuotation;
   };
 
-  const updateQuotation = async (quotationDbId: string, input: EditQuotationInput) => {
-    const subtotal = input.items.reduce((sum, i) => sum + computeQuotationItemAmount(i).amount, 0);
-    if (subtotal <= 0) return;
+  // Compact view of a quotation's money-relevant fields, used for the
+  // before/after audit log written on every edit.
+  const auditHeader = (h: any) => ({
+    amount: h.amount,
+    slab: h.slab,
+    discount_percent: h.discount_percent,
+    discount_amount: h.discount_amount,
+    gst: h.gst,
+    transportation: h.transportation,
+    valid_until: h.valid_until,
+  });
+  const auditItem = (it: any) => ({
+    item_type: it.item_type,
+    description: it.description,
+    length_in: it.length_in ?? null,
+    width_in: it.width_in ?? null,
+    glass_qty: it.glass_qty ?? null,
+    rate_per_sft: it.rate_per_sft ?? null,
+    polish_rate: it.polish_rate ?? null,
+    fixing_rate_per_sft: it.fixing_rate_per_sft ?? null,
+    quantity: it.quantity ?? null,
+    rate: it.rate ?? null,
+    amount: it.amount,
+  });
+
+  // Edit is a swap done in a safe order instead of delete-then-insert:
+  //   1. insert the NEW item rows (old ones untouched — a failure here
+  //      changes nothing)
+  //   2. update the header totals (failure -> remove the new rows)
+  //   3. delete the OLD item rows (failure -> remove new rows, restore
+  //      the old header)
+  // so a failure at any step can no longer leave a quotation with a total
+  // and no items. GST follows input.gstEnabled (what the quotation had,
+  // as confirmed in the modal) — NOT the current global switch.
+  const updateQuotation = async (quotationDbId: string, input: EditQuotationInput): Promise<boolean> => {
+    const subtotal = input.items.reduce((sum, i) => sum + quotationLineAmount(i), 0);
+    if (subtotal <= 0) {
+      showToast('A quotation needs at least one priced item.', 'error');
+      return false;
+    }
     const discountPercent = input.slab === 'A' ? input.discountPercent || 0 : SLAB_DISCOUNT_PERCENT[input.slab];
-    const discountAmount = Math.round(subtotal * (discountPercent / 100) * 100) / 100;
-    const taxableValue = subtotal - discountAmount;
-    const gst = gstEnabled ? Math.round(taxableValue * 0.18 * 100) / 100 : 0;
+    const totals = quotationTotals(subtotal, discountPercent, input.gstEnabled, input.transportation);
     const summary = input.items.slice(0, 3).map((i) => i.description).join(', ') || 'Quotation';
+
+    const [{ data: oldHeader, error: oldHeaderErr }, { data: oldItems, error: oldItemsErr }] = await Promise.all([
+      supabase.from('quotations').select('*').eq('id', quotationDbId).single(),
+      supabase.from('quotation_items').select('*').eq('quotation_id', quotationDbId).order('sort_order'),
+    ]);
+    if (oldHeaderErr || !oldHeader || oldItemsErr) {
+      reportError('Loading quotation for edit', oldHeaderErr ?? oldItemsErr);
+      return false;
+    }
+
+    const itemRows = buildQuotationItemRows(quotationDbId, input.items);
+    const { data: inserted, error: insErr } = await supabase.from('quotation_items').insert(itemRows).select('id');
+    if (insErr || !inserted) {
+      reportError('Saving quotation items', insErr);
+      return false;
+    }
+    const newIds = inserted.map((r: any) => r.id);
+    const removeNewItems = () => supabase.from('quotation_items').delete().in('id', newIds);
 
     const { data: qRow, error: qErr } = await supabase
       .from('quotations')
       .update({
         description: summary,
-        amount: subtotal,
+        amount: totals.subtotal,
         slab: input.slab,
         discount_percent: discountPercent,
-        discount_amount: discountAmount,
-        gst,
+        discount_amount: totals.discountAmount,
+        gst: totals.gst,
         transportation: input.transportation || 0,
         valid_until: input.validUntil,
       })
       .eq('id', quotationDbId)
       .select()
       .single();
-    if (qErr || !qRow) return;
+    if (qErr || !qRow) {
+      await removeNewItems();
+      reportError('Saving quotation', qErr);
+      return false;
+    }
 
-    await supabase.from('quotation_items').delete().eq('quotation_id', quotationDbId);
-    const itemRows = buildQuotationItemRows(quotationDbId, input.items);
-    await supabase.from('quotation_items').insert(itemRows);
+    const oldIds = (oldItems ?? []).map((r: any) => r.id);
+    if (oldIds.length > 0) {
+      const { error: delErr } = await supabase.from('quotation_items').delete().in('id', oldIds);
+      if (delErr) {
+        await removeNewItems();
+        await supabase
+          .from('quotations')
+          .update({
+            description: oldHeader.description,
+            amount: oldHeader.amount,
+            slab: oldHeader.slab,
+            discount_percent: oldHeader.discount_percent,
+            discount_amount: oldHeader.discount_amount,
+            gst: oldHeader.gst,
+            transportation: oldHeader.transportation,
+            valid_until: oldHeader.valid_until,
+          })
+          .eq('id', quotationDbId);
+        reportError('Replacing quotation items', delErr);
+        return false;
+      }
+    }
+
+    // Best-effort audit trail (table comes from migration 006). Never blocks
+    // or fails the save if the table isn't there yet.
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      const { error: auditErr } = await supabase.from('quotation_changes').insert({
+        quotation_id: quotationDbId,
+        changed_by: auth.user?.id ?? null,
+        before_state: { header: auditHeader(oldHeader), items: (oldItems ?? []).map(auditItem) },
+        after_state: { header: auditHeader(qRow), items: itemRows.map(auditItem) },
+      });
+      if (auditErr) console.warn('quotation_changes not written:', auditErr.message);
+    } catch (e) {
+      console.warn('quotation_changes not written:', e);
+    }
 
     const { data: effRow } = await supabase.from('quotations_effective').select('*').eq('id', quotationDbId).single();
     const updated = mapQuotation(effRow ?? qRow);
     setQuotations((prev) => prev.map((q) => (q.dbId === quotationDbId ? updated : q)));
+    return true;
   };
 
   // Single atomic server-side call now (see convert_quotation_to_invoice in
@@ -1224,7 +1355,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const { data: invRow, error } = await supabase.rpc('convert_quotation_to_invoice', {
       p_quotation_id: quotationDbId,
     });
-    if (error || !invRow) return null;
+    if (error || !invRow) {
+      reportError('Converting to invoice', error);
+      return null;
+    }
 
     const full = await fetchInvoiceById(invRow.id);
     if (full) setInvoices((prev) => [full, ...prev]);
@@ -1235,10 +1369,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Hard delete — only reachable for a 'pending' quotation with zero
   // payments recorded (UI also hides the option once status = 'converted'
   // or paidAmount > 0, so the payment ledger is never silently lost).
-  const deleteQuotation = async (quotationDbId: string) => {
+  const deleteQuotation = async (quotationDbId: string): Promise<boolean> => {
     const { error } = await supabase.from('quotations').delete().eq('id', quotationDbId);
-    if (error) return;
+    if (error) {
+      reportError('Deleting quotation', error);
+      return false;
+    }
     setQuotations((prev) => prev.filter((q) => q.dbId !== quotationDbId));
+    return true;
   };
 
   // ---------- Quotation payments ----------
@@ -1258,7 +1396,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       p_method: method,
       p_note: note || null,
     });
-    if (error || !data) return null;
+    if (error || !data) {
+      reportError('Recording payment', error);
+      return null;
+    }
 
     await Promise.all([refreshQuotations(), refreshQuotationPayments(), refreshCustomers(), refreshDashboardSummary()]);
 
@@ -1278,13 +1419,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   // ---------- Workers / Payslips ----------
-  const addWorker = async (input: NewWorkerInput) => {
+  const addWorker = async (input: NewWorkerInput): Promise<boolean> => {
     const { data, error } = await supabase
       .from('workers')
       .insert({ name: input.name, monthly_salary: input.monthlySalary })
       .select()
       .single();
-    if (error || !data) return;
+    if (error || !data) {
+      reportError('Saving worker', error);
+      return false;
+    }
     const newWorker: Worker = {
       id: data.id,
       name: data.name,
@@ -1294,32 +1438,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       remainingThisMonth: Number(data.monthly_salary),
     };
     setWorkers((prev) => [...prev, newWorker].sort((a, b) => a.name.localeCompare(b.name)));
+    return true;
   };
 
-  const updateWorker = async (workerId: string, input: NewWorkerInput) => {
+  const updateWorker = async (workerId: string, input: NewWorkerInput): Promise<boolean> => {
     const { error } = await supabase
       .from('workers')
       .update({ name: input.name, monthly_salary: input.monthlySalary })
       .eq('id', workerId);
-    if (error) return;
+    if (error) {
+      reportError('Updating worker', error);
+      return false;
+    }
     await refreshWorkers();
+    return true;
   };
 
-  const logWorkerAdvance = async (input: NewWorkerAdvanceInput) => {
+  const logWorkerAdvance = async (input: NewWorkerAdvanceInput): Promise<boolean> => {
     const { error } = await supabase.rpc('log_worker_advance', {
       p_worker_id: input.workerId,
       p_amount: input.amount,
       p_date: input.date,
       p_note: input.note ?? '',
     });
-    if (error) return;
+    if (error) {
+      reportError('Logging advance', error);
+      return false;
+    }
     await Promise.all([refreshWorkers(), refreshExpenses(), refreshWorkerAdvances()]);
+    return true;
   };
 
   // Records a salary SETTLEMENT payment — distinct from an advance. Always
   // creates a matching expense row (same pattern as advances), so total
   // payroll spend shows up correctly in Expenses/Reports.
-  const recordWorkerPayment = async (workerId: string, amount: number, date: string, forMonth: string, note?: string) => {
+  const recordWorkerPayment = async (workerId: string, amount: number, date: string, forMonth: string, note?: string): Promise<boolean> => {
     const { error } = await supabase.rpc('record_worker_payment', {
       p_worker_id: workerId,
       p_amount: amount,
@@ -1327,23 +1480,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       p_for_month: forMonth,
       p_note: note || null,
     });
-    if (error) return;
+    if (error) {
+      reportError('Recording salary payment', error);
+      return false;
+    }
     await Promise.all([refreshWorkers(), refreshExpenses(), refreshWorkerPayments()]);
+    return true;
   };
 
   // ---------- Important Links ----------
-  const addLink = async (input: NewLinkInput) => {
+  const addLink = async (input: NewLinkInput): Promise<boolean> => {
     const { data, error } = await supabase
       .from('important_links')
       .insert({ label: input.label, url: input.url, category: input.category || null, sort_order: links.length })
       .select()
       .single();
-    if (error || !data) return;
+    if (error || !data) {
+      reportError('Saving link', error);
+      return false;
+    }
     setLinks((prev) => [...prev, mapImportantLink(data)]);
+    return true;
   };
 
   // ---------- Price List ----------
-  const addPriceListItem = async (input: NewPriceListItemInput) => {
+  const addPriceListItem = async (input: NewPriceListItemInput): Promise<boolean> => {
     const { data, error } = await supabase
       .from('price_list')
       .insert({
@@ -1355,11 +1516,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       })
       .select()
       .single();
-    if (error || !data) return;
+    if (error || !data) {
+      reportError('Saving product', error);
+      return false;
+    }
     setPriceList((prev) => [...prev, mapPriceListItem(data)]);
+    return true;
   };
 
-  const updatePriceListItem = async (id: string, input: NewPriceListItemInput) => {
+  const updatePriceListItem = async (id: string, input: NewPriceListItemInput): Promise<boolean> => {
     const { data, error } = await supabase
       .from('price_list')
       .update({
@@ -1371,14 +1536,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       .eq('id', id)
       .select()
       .single();
-    if (error || !data) return;
+    if (error || !data) {
+      reportError('Updating product', error);
+      return false;
+    }
     setPriceList((prev) => prev.map((p) => (p.id === id ? mapPriceListItem(data) : p)));
+    return true;
   };
 
-  const deletePriceListItem = async (id: string) => {
+  const deletePriceListItem = async (id: string): Promise<boolean> => {
     const { error } = await supabase.from('price_list').delete().eq('id', id);
-    if (error) return;
+    if (error) {
+      reportError('Deleting product', error);
+      return false;
+    }
     setPriceList((prev) => prev.filter((p) => p.id !== id));
+    return true;
   };
 
   const value = useMemo<AppContextValue>(
@@ -1389,6 +1562,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // src/lib/mobileGuard.ts). Read-only values, fetches, and modal
       // open/close toggles are passed through unwrapped.
       toggleGst: guardMobile(toggleGst, isMobileView),
+      toast,
+      showToast,
+      dismissToast,
       customers,
       addCustomer: guardMobile(addCustomer, isMobileView),
       updateCustomer: guardMobile(updateCustomer, isMobileView),
@@ -1397,7 +1573,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       updateVendor: guardMobile(updateVendor, isMobileView),
       expenses,
       addExpense: guardMobile(addExpense, isMobileView),
-      updateExpense: guardMobile(updateExpense, isMobileView),
       vendorPurchases,
       vendorPayments,
       addVendorPurchase: guardMobile(addVendorPurchase, isMobileView),
@@ -1462,19 +1637,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setEditingVendorId(null);
       },
       isExpenseModalOpen,
-      editingExpenseId,
-      openExpenseModal: () => {
-        setEditingExpenseId(null);
-        setExpenseModalOpen(true);
-      },
-      openEditExpenseModal: (id: string) => {
-        setEditingExpenseId(id);
-        setExpenseModalOpen(true);
-      },
-      closeExpenseModal: () => {
-        setExpenseModalOpen(false);
-        setEditingExpenseId(null);
-      },
+      openExpenseModal: () => setExpenseModalOpen(true),
+      closeExpenseModal: () => setExpenseModalOpen(false),
       isQuotationModalOpen,
       quotationModalCustomerId,
       editingQuotationId,
@@ -1541,6 +1705,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       gstEnabled,
+      toast,
+      showToast,
+      dismissToast,
       isMobileView,
       customers,
       vendors,
@@ -1564,7 +1731,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       isVendorModalOpen,
       editingVendorId,
       isExpenseModalOpen,
-      editingExpenseId,
       isQuotationModalOpen,
       quotationModalCustomerId,
       editingQuotationId,

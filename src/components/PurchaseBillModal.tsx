@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import type { PurchaseBillTaxType } from '../types';
-import { capitalizeFirst } from '../utils/format';
+import { capitalizeFirst, todayLocal } from '../utils/format';
+import { BUSINESS } from '../config/business';
 
 const GST_RATES = [5, 12, 18, 28];
 
@@ -21,14 +22,14 @@ function blankItem(): DraftItem {
 }
 
 function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  return todayLocal();
 }
 
 const money = (n: number) => `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
 // Home state for CGST+SGST vs IGST auto-detection — matches the business
 // address on the invoice/quotation printable (Hyderabad, Telangana).
-const BUSINESS_STATE = 'Telangana';
+const BUSINESS_STATE: string = BUSINESS.state;
 
 export default function PurchaseBillModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const { addPurchaseBill } = useApp();
@@ -106,7 +107,7 @@ export default function PurchaseBillModal({ isOpen, onClose }: { isOpen: boolean
   const handleSave = async () => {
     if (!isValid || saving) return;
     setSaving(true);
-    await addPurchaseBill({
+    const bill = await addPurchaseBill({
       supplierGstin: supplierGstin.trim(),
       supplierName: supplierName.trim(),
       supplierAddress: supplierAddress.trim(),
@@ -123,6 +124,7 @@ export default function PurchaseBillModal({ isOpen, onClose }: { isOpen: boolean
       })),
     });
     setSaving(false);
+    if (!bill) return; // failure already toasted; keep the form so nothing typed is lost
     handleClose();
   };
 

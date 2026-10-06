@@ -29,12 +29,12 @@ export default function PriceSlipModal({ slip, onClose }: { slip: VendorSlip | n
   const handleSave = async () => {
     if (!isValid || saving) return;
     setSaving(true);
-    await priceVendorSlip(
+    const ok = await priceVendorSlip(
       slip.id,
       slip.items.map((it) => ({ itemId: it.id, rate: parseFloat(rates[it.id]) || 0 }))
     );
     setSaving(false);
-    onClose();
+    if (ok) onClose();
   };
 
   return (

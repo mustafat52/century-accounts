@@ -30,6 +30,11 @@ export default function MobileNav() {
             Employees
           </NavLink>
         )}
+        {currentUserRole === 'owner' && (
+          <NavLink to="/activity-log" className={({ isActive }) => `mobile-nav-tab${isActive ? ' is-active' : ''}`}>
+            Log
+          </NavLink>
+        )}
       </div>
       <div className="mobile-nav-foot">
         <span className="mobile-nav-banner">View only on mobile — add or edit records from a computer</span>

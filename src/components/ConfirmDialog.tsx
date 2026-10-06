@@ -9,6 +9,9 @@ interface ConfirmDialogProps {
   confirmLabel?: string;
   cancelLabel?: string;
   danger?: boolean; // styles the confirm button red — use for destructive actions (delete, etc.)
+  extraLabel?: string; // optional third button for a second, non-cancel choice
+  onExtra?: () => void;
+  zIndex?: number; // raise above full-screen overlays such as the print preview
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -20,13 +23,16 @@ export default function ConfirmDialog({
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
   danger = false,
+  extraLabel,
+  onExtra,
+  zIndex,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
   if (!open) return null;
 
   return (
-    <div className="modal-overlay is-open">
+    <div className="modal-overlay is-open" style={zIndex ? { zIndex } : undefined}>
       <div className="modal" style={{ width: 420 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3>{title}</h3>
@@ -41,6 +47,11 @@ export default function ConfirmDialog({
           <button className="btn btn-ghost" onClick={onCancel}>
             {cancelLabel}
           </button>
+          {extraLabel && onExtra && (
+            <button className="btn btn-ghost" onClick={onExtra}>
+              {extraLabel}
+            </button>
+          )}
           <button className={danger ? 'btn btn-danger' : 'btn btn-primary'} onClick={onConfirm}>
             {confirmLabel}
           </button>

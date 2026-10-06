@@ -5,6 +5,7 @@ import StatusBadge from '../components/StatusBadge';
 import PaymentModal from '../components/PaymentModal';
 import CopyReminderButton from '../components/CopyReminderButton';
 import ConfirmDialog from '../components/ConfirmDialog';
+import ConvertConfirmDialog from '../components/ConvertConfirmDialog';
 import { useApp } from '../context/AppContext';
 import { formatINR } from '../utils/format';
 import type { Invoice, QuotationEffectiveStatus, Quotation } from '../types';
@@ -37,6 +38,7 @@ export default function Invoicing() {
   const [rollbackTarget, setRollbackTarget] = useState<Invoice | null>(null);
   const [rollbackError, setRollbackError] = useState('');
   const [deleteQuotationTarget, setDeleteQuotationTarget] = useState<Quotation | null>(null);
+  const [convertTarget, setConvertTarget] = useState<Quotation | null>(null);
   const [search, setSearch] = useState('');
   // URL-driven (not local state) so the tab survives navigation from
   // elsewhere (e.g. Customers' "New Bill" or the print preview overlay).
@@ -210,7 +212,7 @@ export default function Invoicing() {
                         {q.status === 'pending' && (
                           <button
                             className="btn btn-primary btn-small desktop-only"
-                            onClick={() => convertQuotationToInvoice(q.dbId)}
+                            onClick={() => setConvertTarget(q)}
                           >
                             Convert to Invoice
                           </button>
@@ -256,7 +258,7 @@ export default function Invoicing() {
               <tbody>
                 {sortedInvoices.length === 0 && (
                   <tr>
-                    <td className="row-sub">{query ? `No invoices match “${search}”.` : 'No invoices yet — a quotation becomes one once it\'s fully paid.'}</td>
+                    <td className="row-sub">{query ? `No invoices match “${search}”.` : 'No invoices yet — a quotation becomes one when you convert it.'}</td>
                   </tr>
                 )}
                 {sortedInvoices.map((i) => (
@@ -325,6 +327,16 @@ export default function Invoicing() {
           setFilter('all');
         }}
         onCancel={() => setRollbackTarget(null)}
+      />
+      <ConvertConfirmDialog
+        quotation={convertTarget}
+        onCancel={() => setConvertTarget(null)}
+        onConfirm={async () => {
+          const target = convertTarget;
+          setConvertTarget(null);
+          // Failure is toasted by the context, so nothing is silent anymore.
+          if (target) await convertQuotationToInvoice(target.dbId);
+        }}
       />
       <ConfirmDialog
         open={deleteQuotationTarget !== null}

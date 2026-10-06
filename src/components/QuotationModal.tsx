@@ -3,7 +3,9 @@ import { useApp } from '../context/AppContext';
 import type { NewQuotationItemInput } from '../context/AppContext';
 import type { InvoiceSlab } from '../types';
 import { SLAB_DISCOUNT_PERCENT } from '../types';
-import { capitalizeFirst } from '../utils/format';
+import { capitalizeFirst, todayLocal, addDaysLocal } from '../utils/format';
+import { glassLine, simpleLine, quotationTotals, LOW_GLASS_RATE_THRESHOLD } from '../lib/quotationMath';
+import ConfirmDialog from './ConfirmDialog';
 
 interface DraftItem {
   key: string;
@@ -21,6 +23,8 @@ interface DraftItem {
   ratePerSft: string;
   polishRate: string;
   fixingRatePerSft: string;
+  // Glass supplied by the customer: no glass rate, polish/fixing only.
+  labourOnly: boolean;
 }
 
 let draftKeyCounter = 0;
@@ -40,6 +44,7 @@ function blankItem(type: 'glass' | 'simple' = 'simple'): DraftItem {
     ratePerSft: '',
     polishRate: '',
     fixingRatePerSft: '',
+    labourOnly: false,
   };
 }
 
@@ -60,9 +65,10 @@ function itemInputToDraft(i: NewQuotationItemInput): DraftItem {
       lengthIn: String(i.lengthIn),
       widthIn: String(i.widthIn),
       glassQty: String(i.qty),
-      ratePerSft: String(i.ratePerSft),
+      ratePerSft: i.ratePerSft === 0 ? '' : String(i.ratePerSft),
       polishRate: i.polishRate ? String(i.polishRate) : '',
       fixingRatePerSft: i.fixingRatePerSft ? String(i.fixingRatePerSft) : '',
+      labourOnly: i.ratePerSft === 0,
     };
   }
   return {
@@ -79,56 +85,76 @@ function itemInputToDraft(i: NewQuotationItemInput): DraftItem {
     ratePerSft: '',
     polishRate: '',
     fixingRatePerSft: '',
+    labourOnly: false,
   };
 }
 
-// Glass is billed in 6-inch increments — length/width round UP to the next
-// multiple of 6, never to the nearest one (46in bills as 48in). Must match
-// AppContext's quotation math exactly (same rule invoices use), or the
-// preview shown here would disagree with what actually gets saved.
-const roundUpTo6 = (n: number) => (n > 0 ? Math.ceil(n / 6) * 6 : 0);
+// All arithmetic comes from lib/quotationMath.ts (shared with AppContext),
+// so this preview can never disagree with what actually gets saved.
+const effectiveRate = (it: DraftItem) => (it.labourOnly ? 0 : parseFloat(it.ratePerSft) || 0);
 
 function computeGlassAmount(it: DraftItem) {
-  const len = roundUpTo6(parseFloat(it.lengthIn) || 0);
-  const wid = roundUpTo6(parseFloat(it.widthIn) || 0);
-  const qty = parseFloat(it.glassQty) || 0;
-  const ratePerSft = parseFloat(it.ratePerSft) || 0;
-  const polishRate = parseFloat(it.polishRate) || 0;
-  const fixingRate = parseFloat(it.fixingRatePerSft) || 0;
-
-  const sft = ((len * wid) / 144) * qty;
-  const workGlass = sft * ratePerSft;
-  const rft = ((2 * (len + wid)) / 12) * qty;
-  const polish = rft * polishRate;
-  const fixing = sft * fixingRate;
-
-  return { len, wid, sft, rft, amount: workGlass + polish + fixing };
-}
-
-function computeSimpleAmount(it: DraftItem) {
-  return (parseFloat(it.quantity) || 0) * (parseFloat(it.rate) || 0);
+  return glassLine({
+    lengthIn: parseFloat(it.lengthIn) || 0,
+    widthIn: parseFloat(it.widthIn) || 0,
+    qty: parseFloat(it.glassQty) || 0,
+    ratePerSft: effectiveRate(it),
+    polishRate: parseFloat(it.polishRate) || 0,
+    fixingRatePerSft: parseFloat(it.fixingRatePerSft) || 0,
+  });
 }
 
 function computeItemAmount(it: DraftItem): number {
-  return it.type === 'glass' ? computeGlassAmount(it).amount : computeSimpleAmount(it);
+  return it.type === 'glass' ? computeGlassAmount(it).amount : simpleLine(parseFloat(it.quantity) || 0, parseFloat(it.rate) || 0).amount;
 }
 
 function isItemValid(it: DraftItem): boolean {
-  return Boolean(
-    it.description.trim() &&
-      (it.type === 'simple'
-        ? (parseFloat(it.quantity) || 0) > 0 && (parseFloat(it.rate) || 0) > 0
-        : (parseFloat(it.lengthIn) || 0) > 0 &&
-          (parseFloat(it.widthIn) || 0) > 0 &&
-          (parseFloat(it.glassQty) || 0) > 0 &&
-          (parseFloat(it.ratePerSft) || 0) > 0)
+  if (!it.description.trim()) return false;
+  if (it.type === 'simple') return (parseFloat(it.quantity) || 0) > 0 && (parseFloat(it.rate) || 0) > 0;
+  const sizeOk = (parseFloat(it.lengthIn) || 0) > 0 && (parseFloat(it.widthIn) || 0) > 0 && (parseFloat(it.glassQty) || 0) > 0;
+  // Labour-only rows have no glass rate, but must still charge polish or
+  // fixing — otherwise the line would be worth nothing.
+  return sizeOk && (it.labourOnly ? (parseFloat(it.polishRate) || 0) > 0 || (parseFloat(it.fixingRatePerSft) || 0) > 0 : (parseFloat(it.ratePerSft) || 0) > 0);
+}
+
+function isLowRate(it: DraftItem): boolean {
+  return it.type === 'glass' && !it.labourOnly && isItemValid(it) && (parseFloat(it.ratePerSft) || 0) < LOW_GLASS_RATE_THRESHOLD;
+}
+
+function draftsToPayload(drafts: DraftItem[]): NewQuotationItemInput[] {
+  return drafts.filter(isItemValid).map((it) =>
+    it.type === 'glass'
+      ? {
+          type: 'glass',
+          description: it.description.trim(),
+          area: it.area.trim() || null,
+          thicknessMm: it.thicknessMm.trim() || null,
+          lengthIn: parseFloat(it.lengthIn) || 0,
+          widthIn: parseFloat(it.widthIn) || 0,
+          qty: parseFloat(it.glassQty) || 0,
+          ratePerSft: effectiveRate(it),
+          polishRate: parseFloat(it.polishRate) || 0,
+          fixingRatePerSft: parseFloat(it.fixingRatePerSft) || 0,
+        }
+      : {
+          type: 'simple',
+          description: it.description.trim(),
+          area: it.area.trim() || null,
+          quantity: parseFloat(it.quantity) || 0,
+          rate: parseFloat(it.rate) || 0,
+        }
   );
 }
 
+const effectiveDiscount = (slab: InvoiceSlab, custom: string) => (slab === 'A' ? parseFloat(custom) || 0 : SLAB_DISCOUNT_PERCENT[slab]);
+
+// Used to skip the write entirely when Edit is saved with nothing changed.
+function buildSnapshot(h: { validUntil: string; slab: InvoiceSlab; discount: number; transport: number; gst: boolean }, payload: NewQuotationItemInput[]) {
+  return JSON.stringify({ ...h, payload });
+}
+
 function defaultValidUntil(): string {
-  const d = new Date();
-  d.setDate(d.getDate() + 2); // matches "Quotation Validity - 2 days" T&C
-  return d.toISOString().slice(0, 10);
+  return addDaysLocal(todayLocal(), 2); // matches "Quotation Validity - 2 days" T&C
 }
 
 const money = (n: number) => `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -146,6 +172,7 @@ export default function QuotationModal() {
     fetchQuotationItems,
     gstEnabled,
     priceList,
+    showToast,
   } = useApp();
 
   // Quotations can only ever be linked to a customer already in the
@@ -165,6 +192,12 @@ export default function QuotationModal() {
   // active when it's saved. Mirrors InvoiceModal exactly.
   const [activeTab, setActiveTab] = useState<'glass' | 'simple'>('glass');
   const [saving, setSaving] = useState(false);
+  // GST is a property of THIS quotation, not the global switch: new ones
+  // start from the switch, edits start from what the quotation had.
+  const [gstOn, setGstOn] = useState(false);
+  const [loadingItems, setLoadingItems] = useState(false);
+  const [lowRateConfirmOpen, setLowRateConfirmOpen] = useState(false);
+  const initialSnapshotRef = useRef<string | null>(null);
   const wasOpenRef = useRef(false);
 
   const editingQuotation = editingQuotationId ? quotations.find((q) => q.dbId === editingQuotationId) : null;
@@ -177,6 +210,9 @@ export default function QuotationModal() {
         setSlab(editingQuotation.slab);
         setCustomDiscount(editingQuotation.slab === 'A' ? String(editingQuotation.discountPercent) : '0');
         setTransportation(editingQuotation.transportation > 0 ? String(editingQuotation.transportation) : '');
+        setGstOn(editingQuotation.gst > 0);
+        setLoadingItems(true);
+        initialSnapshotRef.current = null;
         // Reload the quotation's real saved items into the form — without
         // this, "Edit" opens with no items at all. Default to whichever
         // section actually has items (preferring Glass if both do), so
@@ -185,6 +221,17 @@ export default function QuotationModal() {
           const draftItems = loaded.length > 0 ? loaded.map(itemInputToDraft) : [blankItem('glass')];
           setItems(draftItems);
           setActiveTab(draftItems.some((it) => it.type === 'glass') ? 'glass' : 'simple');
+          initialSnapshotRef.current = buildSnapshot(
+            {
+              validUntil: editingQuotation.validUntil,
+              slab: editingQuotation.slab,
+              discount: effectiveDiscount(editingQuotation.slab, editingQuotation.slab === 'A' ? String(editingQuotation.discountPercent) : '0'),
+              transport: editingQuotation.transportation || 0,
+              gst: editingQuotation.gst > 0,
+            },
+            draftsToPayload(draftItems)
+          );
+          setLoadingItems(false);
         });
       } else {
         setCustomerId(quotationModalCustomerId ?? '');
@@ -192,6 +239,9 @@ export default function QuotationModal() {
         setSlab('A');
         setCustomDiscount('0');
         setTransportation('');
+        setGstOn(gstEnabled);
+        setLoadingItems(false);
+        initialSnapshotRef.current = null;
         setItems([blankItem('glass')]);
         setActiveTab('glass');
       }
@@ -276,13 +326,11 @@ export default function QuotationModal() {
     setItems((prev) => (prev.some((it) => it.type === t) ? prev : [...prev, blankItem(t)]));
   };
 
-  const subtotal = items.reduce((sum, it) => sum + computeItemAmount(it), 0);
-  const discountPercent = slab === 'A' ? parseFloat(customDiscount) || 0 : SLAB_DISCOUNT_PERCENT[slab];
-  const discountAmount = subtotal * (discountPercent / 100);
-  const taxableValue = subtotal - discountAmount;
-  const gstAmount = gstEnabled ? Math.round(taxableValue * 0.18) : 0;
+  const subtotalRaw = items.reduce((sum, it) => sum + computeItemAmount(it), 0);
+  const discountPercent = effectiveDiscount(slab, customDiscount);
   const transportNum = parseFloat(transportation) || 0;
-  const grandTotal = taxableValue + gstAmount + transportNum;
+  const { subtotal, discountAmount, gst: gstAmount, grandTotal } = quotationTotals(subtotalRaw, discountPercent, gstOn, transportNum);
+  const lowRateItems = items.filter(isLowRate);
 
   // Only rows that are actually filled in count toward validity/saving —
   // the trailing auto-added blank draft row of each type is expected to be
@@ -298,40 +346,49 @@ export default function QuotationModal() {
   const glassCount = items.filter((it) => it.type === 'glass' && isItemValid(it)).length;
   const visibleItems = items.filter((it) => it.type === activeTab);
 
-  const handleSave = async () => {
-    if (!isValid || saving) return;
+  const doSave = async () => {
     setSaving(true);
+    const payloadItems = draftsToPayload(items);
 
-    const payloadItems: NewQuotationItemInput[] = realItems.map((it) =>
-      it.type === 'glass'
-        ? {
-            type: 'glass',
-            description: it.description.trim(),
-            area: it.area.trim() || null,
-            thicknessMm: it.thicknessMm.trim() || null,
-            lengthIn: parseFloat(it.lengthIn) || 0,
-            widthIn: parseFloat(it.widthIn) || 0,
-            qty: parseFloat(it.glassQty) || 0,
-            ratePerSft: parseFloat(it.ratePerSft) || 0,
-            polishRate: parseFloat(it.polishRate) || 0,
-            fixingRatePerSft: parseFloat(it.fixingRatePerSft) || 0,
-          }
-        : {
-            type: 'simple',
-            description: it.description.trim(),
-            area: it.area.trim() || null,
-            quantity: parseFloat(it.quantity) || 0,
-            rate: parseFloat(it.rate) || 0,
-          }
-    );
-
+    let ok: boolean;
     if (editingQuotationId) {
-      await updateQuotation(editingQuotationId, { validUntil, slab, discountPercent, transportation: transportNum, items: payloadItems });
+      const snapshot = buildSnapshot(
+        { validUntil, slab, discount: discountPercent, transport: transportNum, gst: gstOn },
+        payloadItems
+      );
+      if (snapshot === initialSnapshotRef.current) {
+        // Nothing changed — don't rewrite every item row for no reason.
+        setSaving(false);
+        showToast('No changes to save.', 'info');
+        closeQuotationModal();
+        return;
+      }
+      ok = await updateQuotation(editingQuotationId, {
+        validUntil,
+        slab,
+        discountPercent,
+        transportation: transportNum,
+        gstEnabled: gstOn,
+        items: payloadItems,
+      });
     } else {
-      await addQuotation({ customerId, validUntil, slab, discountPercent, transportation: transportNum, items: payloadItems });
+      ok = Boolean(
+        await addQuotation({ customerId, validUntil, slab, discountPercent, transportation: transportNum, gstEnabled: gstOn, items: payloadItems })
+      );
     }
     setSaving(false);
-    closeQuotationModal();
+    // On failure the context has already shown the error; the modal stays
+    // open with everything typed so nothing has to be re-entered.
+    if (ok) closeQuotationModal();
+  };
+
+  const handleSave = () => {
+    if (!isValid || saving || loadingItems) return;
+    if (lowRateItems.length > 0) {
+      setLowRateConfirmOpen(true);
+      return;
+    }
+    void doSave();
   };
 
   return (
@@ -504,7 +561,14 @@ export default function QuotationModal() {
                     </div>
                     <div className="form-field">
                       <label>Rate / Sft (₹)</label>
-                      <input type="number" value={item.ratePerSft} onChange={(e) => updateItem(item.key, { ratePerSft: e.target.value })} />
+                      <input
+                        type="number"
+                        value={item.labourOnly ? '' : item.ratePerSft}
+                        disabled={item.labourOnly}
+                        placeholder={item.labourOnly ? 'Labour only' : ''}
+                        onChange={(e) => updateItem(item.key, { ratePerSft: e.target.value })}
+                      />
+                      {isLowRate(item) && <div className="field-warn">Very low rate (under ₹{LOW_GLASS_RATE_THRESHOLD}/sft). Check before saving.</div>}
                     </div>
 
                     <div className="form-field">
@@ -518,6 +582,16 @@ export default function QuotationModal() {
                         value={item.fixingRatePerSft}
                         onChange={(e) => updateItem(item.key, { fixingRatePerSft: e.target.value })}
                       />
+                    </div>
+                    <div className="form-field span-2">
+                      <label className="check-label">
+                        <input
+                          type="checkbox"
+                          checked={item.labourOnly}
+                          onChange={(e) => updateItem(item.key, { labourOnly: e.target.checked, ratePerSft: e.target.checked ? '' : item.ratePerSft })}
+                        />
+                        Labour only (glass supplied by customer): no glass rate, polish/fixing still charged
+                      </label>
                     </div>
                     <div className="form-field">
                       <label>Computed</label>
@@ -563,10 +637,27 @@ export default function QuotationModal() {
             </button>
           </div>
 
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+            <label className="check-label">
+              <input type="checkbox" checked={gstOn} onChange={(e) => setGstOn(e.target.checked)} />
+              Charge GST (CGST+SGST 18%)
+            </label>
+          </div>
+          {editingQuotation && gstOn !== editingQuotation.gst > 0 && (
+            <div className="field-warn" style={{ textAlign: 'right' }}>
+              This differs from how the quotation was originally saved ({editingQuotation.gst > 0 ? 'with' : 'without'} GST).
+            </div>
+          )}
+          {lowRateItems.length > 0 && (
+            <div className="field-warn" style={{ textAlign: 'right' }}>
+              {lowRateItems.length} glass item{lowRateItems.length > 1 ? 's have' : ' has'} a rate under ₹{LOW_GLASS_RATE_THRESHOLD}/sft. You will be asked to confirm on save.
+            </div>
+          )}
+
           <div className="row-sub" style={{ marginTop: 6, textAlign: 'right', lineHeight: 1.8 }}>
             Subtotal: {money(subtotal)}
             {discountPercent > 0 && <> · Slab {slab} discount ({discountPercent}%): −{money(discountAmount)}</>}
-            {gstEnabled && <> · CGST+SGST (18%): {money(gstAmount)}</>}
+            {gstOn && <> · CGST+SGST (18%): {money(gstAmount)}</>}
             {transportNum > 0 && <> · Transport: {money(transportNum)}</>}
             <br />
             <strong style={{ color: 'var(--text)', fontSize: 16 }}>Total: {money(grandTotal)}</strong>
@@ -577,11 +668,25 @@ export default function QuotationModal() {
           <button className="btn btn-ghost" onClick={closeQuotationModal}>
             Cancel
           </button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={!isValid || saving}>
-            {saving ? 'Saving…' : editingQuotationId ? 'Save changes' : 'Save quotation'}
+          <button className="btn btn-primary" onClick={handleSave} disabled={!isValid || saving || loadingItems}>
+            {saving ? 'Saving…' : loadingItems ? 'Loading items…' : editingQuotationId ? 'Save changes' : 'Save quotation'}
           </button>
         </div>
       </div>
+      <ConfirmDialog
+        open={lowRateConfirmOpen}
+        title="Very low glass rate"
+        message={`${lowRateItems.length} glass item${lowRateItems.length > 1 ? 's have' : ' has'} a rate under ₹${LOW_GLASS_RATE_THRESHOLD} per sft${
+          lowRateItems.length ? ` (lowest: ₹${Math.min(...lowRateItems.map((i) => parseFloat(i.ratePerSft) || 0))})` : ''
+        }. If the glass is supplied by the customer, tick "Labour only" instead. Save anyway?`}
+        confirmLabel="Save anyway"
+        cancelLabel="Go back"
+        onCancel={() => setLowRateConfirmOpen(false)}
+        onConfirm={() => {
+          setLowRateConfirmOpen(false);
+          void doSave();
+        }}
+      />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useInventory } from '../../context/InventoryContext';
+import ConfirmDialog from '../../components/ConfirmDialog';
 import { parseFractionInches, formatFractionInches } from '../../lib/fractionInches';
 import type { StockCategory, StockLine } from '../../inventoryTypes';
 
@@ -15,9 +16,13 @@ import type { StockCategory, StockLine } from '../../inventoryTypes';
 function StockQuantityCell({
   stockLine,
   onCommit,
+  onReduceRequest,
 }: {
   stockLine: StockLine;
   onCommit: (id: string, quantity: number) => void;
+  // Reducing stock needs an in-app confirmation owned by the page; the
+  // cell passes the target quantity and a way to revert its draft.
+  onReduceRequest: (stockLine: StockLine, quantity: number, revert: () => void) => void;
 }) {
   const [draft, setDraft] = useState(String(stockLine.quantity));
 
@@ -38,15 +43,8 @@ function StockQuantityCell({
     if (q === stockLine.quantity) return; // no actual change, nothing to do
 
     if (q < stockLine.quantity) {
-      const ok = confirm(
-        `Reduce ${stockLine.categoryName} ${formatFractionInches(stockLine.lengthIn)} × ${formatFractionInches(
-          stockLine.widthIn
-        )} from ${stockLine.quantity} to ${q}?`
-      );
-      if (!ok) {
-        setDraft(String(stockLine.quantity));
-        return;
-      }
+      onReduceRequest(stockLine, q, () => setDraft(String(stockLine.quantity)));
+      return;
     }
 
     onCommit(stockLine.id, q);
@@ -170,6 +168,16 @@ export default function CategoriesStock() {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    danger?: boolean;
+    onConfirm: () => void;
+    onCancel?: () => void;
+    extraLabel?: string;
+    onExtra?: () => void;
+  } | null>(null);
 
   const [stockCategoryId, setStockCategoryId] = useState('');
   const [lengthRaw, setLengthRaw] = useState('');
@@ -198,25 +206,63 @@ export default function CategoriesStock() {
     if (!ok) setFormError('Could not rename category — name may already be in use.');
   }
 
-  async function handleDeleteCategory(id: string) {
-    if (!confirm('Delete this category? It must have no stock lines first.')) return;
-    const ok = await deleteCategory(id);
-    if (!ok) setFormError('Could not delete category — it still has stock lines referencing it.');
+  function handleDeleteCategory(id: string) {
+    setConfirmState({
+      title: 'Delete category?',
+      message: 'Delete this category? It must have no stock lines first.',
+      confirmLabel: 'Delete',
+      danger: true,
+      onConfirm: async () => {
+        const ok = await deleteCategory(id);
+        if (!ok) setFormError('Could not delete category — it still has stock lines referencing it.');
+      },
+    });
   }
 
-  async function handleDeleteStock(s: (typeof stockLines)[number]) {
+  function handleReduceRequest(s: StockLine, q: number, revert: () => void) {
+    setConfirmState({
+      title: 'Reduce stock?',
+      message: `Reduce ${s.categoryName} ${formatFractionInches(s.lengthIn)} × ${formatFractionInches(s.widthIn)} from ${s.quantity} to ${q}?`,
+      confirmLabel: 'Reduce',
+      onConfirm: async () => {
+        const ok = await updateStockQuantity(s.id, q);
+        if (!ok) revert();
+      },
+      onCancel: revert,
+    });
+  }
+
+  function handleDeleteStock(s: (typeof stockLines)[number]) {
     // Removing a stock line is as destructive as a quantity reduction to
     // zero (arguably more so — it also drops the size/origin record, not
     // just the count), so it gets the same explicit-confirmation
     // treatment as StockQuantityCell's reduce path, naming exactly what's
     // about to disappear.
-    const ok = confirm(
-      `Remove this stock line entirely — ${s.categoryName} ${formatFractionInches(s.lengthIn)} × ${formatFractionInches(
+    setConfirmState({
+      title: 'Remove stock line?',
+      message: `Remove this stock line entirely — ${s.categoryName} ${formatFractionInches(s.lengthIn)} × ${formatFractionInches(
         s.widthIn
-      )}, qty ${s.quantity}? This can't be undone.`
-    );
-    if (!ok) return;
-    await deleteStockLine(s.id);
+      )}, qty ${s.quantity}? This can't be undone.`,
+      confirmLabel: 'Remove',
+      danger: true,
+      onConfirm: async () => {
+        await deleteStockLine(s.id);
+      },
+    });
+  }
+
+  function resetStockForm() {
+    setLengthRaw('');
+    setWidthRaw('');
+    setQuantityRaw('1');
+  }
+
+  async function addSeparateLine(length: number, width: number, quantity: number) {
+    setSubmitting(true);
+    const created = await addStockLine({ categoryId: stockCategoryId, lengthIn: length, widthIn: width, quantity });
+    setSubmitting(false);
+    if (!created) return setFormError('Could not add stock line.');
+    resetStockForm();
   }
 
   async function handleAddStock(e: FormEvent) {
@@ -244,31 +290,28 @@ export default function CategoriesStock() {
     if (existing) {
       const combined = existing.quantity + quantity;
       const categoryName = categories.find((c) => c.id === stockCategoryId)?.name ?? 'this category';
-      const mergeInstead = confirm(
-        `${categoryName} ${formatFractionInches(length)} × ${formatFractionInches(existing.widthIn)} already has ${
+      setConfirmState({
+        title: 'Size already in stock',
+        message: `${categoryName} ${formatFractionInches(length)} × ${formatFractionInches(existing.widthIn)} already has ${
           existing.quantity
-        } in stock. Add ${quantity} more to make ${combined}?\n\nCancel to add this as a separate line instead.`
-      );
-      if (mergeInstead) {
-        setSubmitting(true);
-        await updateStockQuantity(existing.id, combined);
-        setSubmitting(false);
-        setLengthRaw('');
-        setWidthRaw('');
-        setQuantityRaw('1');
-        return;
-      }
-      // else fall through — add as a genuinely separate line, as before
+        } in stock. Add ${quantity} more to make ${combined}, or add this as a separate line?`,
+        confirmLabel: `Add to existing (${combined})`,
+        extraLabel: 'Add as separate line',
+        onExtra: () => {
+          setConfirmState(null);
+          void addSeparateLine(length, width, quantity);
+        },
+        onConfirm: async () => {
+          setSubmitting(true);
+          const ok = await updateStockQuantity(existing.id, combined);
+          setSubmitting(false);
+          if (ok) resetStockForm();
+        },
+      });
+      return;
     }
 
-    setSubmitting(true);
-    const created = await addStockLine({ categoryId: stockCategoryId, lengthIn: length, widthIn: width, quantity });
-    setSubmitting(false);
-    if (!created) return setFormError('Could not add stock line.');
-
-    setLengthRaw('');
-    setWidthRaw('');
-    setQuantityRaw('1');
+    await addSeparateLine(length, width, quantity);
   }
 
   return (
@@ -464,7 +507,7 @@ export default function CategoriesStock() {
                         {isMobileView ? (
                           <span className="num">{s.quantity}</span>
                         ) : (
-                          <StockQuantityCell stockLine={s} onCommit={updateStockQuantity} />
+                          <StockQuantityCell stockLine={s} onCommit={updateStockQuantity} onReduceRequest={handleReduceRequest} />
                         )}
                       </td>
                       <td style={{ width: 1, textAlign: 'right' }}>
@@ -480,6 +523,25 @@ export default function CategoriesStock() {
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmState !== null}
+        title={confirmState?.title ?? ''}
+        message={confirmState?.message ?? ''}
+        confirmLabel={confirmState?.confirmLabel}
+        danger={confirmState?.danger}
+        extraLabel={confirmState?.extraLabel}
+        onExtra={confirmState?.onExtra}
+        onConfirm={() => {
+          const action = confirmState?.onConfirm;
+          setConfirmState(null);
+          action?.();
+        }}
+        onCancel={() => {
+          confirmState?.onCancel?.();
+          setConfirmState(null);
+        }}
+      />
     </>
   );
 }

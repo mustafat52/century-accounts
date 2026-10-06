@@ -48,13 +48,9 @@ export default function PriceListModal({ editingItem, onClose }: PriceListModalP
       polishRate: Number(polishRate) || 0,
       fixingRate: Number(fixingRate) || 0,
     };
-    if (editingItem) {
-      await updatePriceListItem(editingItem.id, input);
-    } else {
-      await addPriceListItem(input);
-    }
+    const ok = editingItem ? await updatePriceListItem(editingItem.id, input) : await addPriceListItem(input);
     setSaving(false);
-    onClose();
+    if (ok) onClose();
   };
 
   return (

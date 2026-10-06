@@ -19,11 +19,11 @@ export default function LinkModal() {
 
   if (!isLinkModalOpen) return null;
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!label || !url) return;
     const normalizedUrl = /^https?:\/\//i.test(url) ? url : `https://${url}`;
-    addLink({ label, url: normalizedUrl, category: category || undefined });
-    closeLinkModal();
+    const ok = await addLink({ label, url: normalizedUrl, category: category || undefined });
+    if (ok) closeLinkModal();
   };
 
   return (

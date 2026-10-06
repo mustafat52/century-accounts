@@ -1,18 +1,38 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { formatINR } from '../utils/format';
+import { formatINR, todayLocal } from '../utils/format';
+import { BUSINESS } from '../config/business';
+import ConvertConfirmDialog from './ConvertConfirmDialog';
 import type { QuotationItem } from '../types';
 import { PAYMENT_METHOD_LABELS } from '../types';
 import logoLight from '../assets/logo-light.png';
 import { useIsMobile } from '../hooks/useIsMobile';
 
+// Business name sits directly under the logo (which already carries the
+// tagline), then the address block. Used by every printed document.
+const LOGO_WIDTH = 120;
 const BUSINESS_HEADER = (
-  <div style={{ fontSize: 10, color: '#666', marginTop: 4, lineHeight: 1.4 }}>
-    11-1-268, X Road, opposite Hameed Cafe, Darus Salam, Aghapura, Nampally, Hyderabad, Telangana 500001
-    <br />
-    centuryglassart@gmail.com
-    <br />
-    GSTIN: 36AMJPH2003H1ZI
+  <div style={{ width: LOGO_WIDTH + 40 }}>
+    <div
+      style={{
+        fontFamily: "'Fraunces', Georgia, serif",
+        fontWeight: 700,
+        fontSize: 15,
+        letterSpacing: '0.02em',
+        color: '#1a1a1a',
+        lineHeight: 1.2,
+        marginTop: 2,
+      }}
+    >
+      {BUSINESS.name}
+    </div>
+    <div style={{ fontSize: 10, color: '#666', marginTop: 4, lineHeight: 1.4 }}>
+      {BUSINESS.address}
+      <br />
+      {BUSINESS.email}
+      <br />
+      GSTIN: {BUSINESS.gstin}
+    </div>
   </div>
 );
 
@@ -46,6 +66,7 @@ export default function PrintableDocument() {
   // which are preloaded) — so printing one means fetching its real,
   // fully-computed line items on demand here.
   const [quotationItems, setQuotationItems] = useState<QuotationItem[]>([]);
+  const [confirmConvert, setConfirmConvert] = useState(false);
 
   useEffect(() => {
     if (printTarget?.kind === 'quotation' || printTarget?.kind === 'ledger') {
@@ -91,7 +112,7 @@ export default function PrintableDocument() {
         <div className="receipt-page">
           <div className="receipt-head">
             <div>
-              <img src={logoLight} alt="Century Glass Art" style={{ width: 130, height: 'auto', marginBottom: 4 }} />
+              <img src={logoLight} alt="Century Glass Art" style={{ width: LOGO_WIDTH, height: 'auto', marginBottom: 4 }} />
               {BUSINESS_HEADER}
             </div>
             <div className="receipt-meta">
@@ -169,10 +190,7 @@ export default function PrintableDocument() {
           {quotation.status === 'pending' && (
             <button
               className="btn btn-primary desktop-only"
-              onClick={async () => {
-                await convertQuotationToInvoice(quotation.dbId);
-                closePrint();
-              }}
+              onClick={() => setConfirmConvert(true)}
             >
               Convert to Invoice
             </button>
@@ -185,16 +203,27 @@ export default function PrintableDocument() {
           </button>
         </div>
 
+        <ConvertConfirmDialog
+          quotation={confirmConvert ? quotation : null}
+          zIndex={120}
+          onCancel={() => setConfirmConvert(false)}
+          onConfirm={async () => {
+            setConfirmConvert(false);
+            const inv = await convertQuotationToInvoice(quotation.dbId);
+            if (inv) closePrint();
+          }}
+        />
+
         <div className="receipt-page">
           <div className="receipt-head">
             <div>
-              <img src={logoLight} alt="Century Glass Art" style={{ width: 120, height: 'auto', marginBottom: 4 }} />
+              <img src={logoLight} alt="Century Glass Art" style={{ width: LOGO_WIDTH, height: 'auto', marginBottom: 4 }} />
               {BUSINESS_HEADER}
             </div>
             <div className="receipt-meta">
               <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>PAYMENT LEDGER</div>
               <div style={{ marginTop: 6 }}>{quotation.id}</div>
-              <div>As of: {new Date().toISOString().slice(0, 10)}</div>
+              <div>As of: {todayLocal()}</div>
             </div>
           </div>
 
@@ -333,7 +362,7 @@ export default function PrintableDocument() {
       <div className="receipt-page">
         <div className="receipt-head">
           <div>
-            <img src={logoLight} alt="Century Glass Art" style={{ width: 120, height: 'auto', marginBottom: 4 }} />
+            <img src={logoLight} alt="Century Glass Art" style={{ width: LOGO_WIDTH, height: 'auto', marginBottom: 4 }} />
             {BUSINESS_HEADER}
           </div>
           <div className="receipt-meta">
@@ -469,11 +498,11 @@ export default function PrintableDocument() {
             <div>
               <div className="receipt-section-label">Bank Details</div>
               <div style={{ fontSize: 10, color: '#555', lineHeight: 1.5 }}>
-                <div>Company Name - Century Glass Art</div>
-                <div>Bank Name - KOTAK MAHINDRA BANK</div>
-                <div>Branch - N.S Road</div>
-                <div>Account No – 7113145246</div>
-                <div>IFSC Code - KKBK0007452</div>
+                <div>Company Name - {BUSINESS.bank.companyName}</div>
+                <div>Bank Name - {BUSINESS.bank.bankName}</div>
+                <div>Branch - {BUSINESS.bank.branch}</div>
+                <div>Account No – {BUSINESS.bank.accountNo}</div>
+                <div>IFSC Code - {BUSINESS.bank.ifsc}</div>
               </div>
             </div>
           </div>

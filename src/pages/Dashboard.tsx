@@ -4,15 +4,13 @@ import Topbar from '../components/Topbar';
 import StatCard from '../components/StatCard';
 import StatusBadge from '../components/StatusBadge';
 import { useApp } from '../context/AppContext';
-import { formatINR } from '../utils/format';
+import { formatINR, addDaysLocal } from '../utils/format';
 
 // The 30-day due/overdue clock always runs from the quotation's creation
 // date — same rule as quotations_effective in schema.sql, computed here
 // purely for the "due X" display text.
 function dueDateFor(dateStr: string): string {
-  const d = new Date(dateStr);
-  d.setDate(d.getDate() + 30);
-  return d.toISOString().slice(0, 10);
+  return addDaysLocal(dateStr, 30);
 }
 
 export default function Dashboard() {

@@ -34,13 +34,9 @@ export default function VendorModal() {
     if (!name || !contact || saving) return;
     setSaving(true);
     const input = { name, category: category || 'General', contact };
-    if (editingVendorId) {
-      await updateVendor(editingVendorId, input);
-    } else {
-      await addVendor(input);
-    }
+    const ok = editingVendorId ? await updateVendor(editingVendorId, input) : Boolean(await addVendor(input));
     setSaving(false);
-    closeVendorModal();
+    if (ok) closeVendorModal();
   };
 
   return (

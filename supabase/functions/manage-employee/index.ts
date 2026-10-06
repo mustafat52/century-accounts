@@ -1,3 +1,6 @@
+// @ts-nocheck
+// This file runs on Deno (Supabase Edge Functions), not in the Vite/Node project.
+// VS Code's TypeScript doesn't know Deno globals or https:// imports, so editor checking is off here.
 // manage-employee — Supabase Edge Function
 //
 // The only place in this project allowed to hold the Supabase
@@ -59,7 +62,7 @@ Deno.serve(async (req) => {
 
   const { data: callerProfile, error: callerProfileErr } = await admin
     .from('profiles')
-    .select('role, is_active')
+    .select('role, is_active, display_name')
     .eq('id', callerData.user.id)
     .single();
 
@@ -76,6 +79,21 @@ Deno.serve(async (req) => {
   }
 
   const action = body.action;
+
+  // Writes the activity_log row for an employee-login change with the OWNER
+  // as the actor (the database trigger can't know who called this function).
+  // Never fails the request if logging fails.
+  const logEmployeeEvent = async (kind: 'insert' | 'delete', targetId: string, row: Record<string, unknown>) => {
+    const { error: logErr } = await admin.from('activity_log').insert({
+      actor_id: callerData.user.id,
+      actor_name: callerProfile.display_name || callerData.user.email || 'Owner',
+      action: kind,
+      table_name: 'profiles',
+      record_id: targetId,
+      row_data: row,
+    });
+    if (logErr) console.error('activity_log write failed:', logErr.message);
+  };
 
   // ---------- Create a new employee login ----------
   if (action === 'create') {
@@ -113,6 +131,8 @@ Deno.serve(async (req) => {
       return json({ error: insertErr.message }, 400);
     }
 
+    await logEmployeeEvent('insert', created.user.id, { display_name: displayName, email, role: 'employee', is_active: true });
+
     return json({
       id: created.user.id,
       displayName,
@@ -130,6 +150,12 @@ Deno.serve(async (req) => {
       return json({ error: "You can't delete your own login." }, 400);
     }
 
+    // Never delete an owner login through this path, even if the UI is
+    // bypassed — the owner check above only proves the CALLER is an owner.
+    const { data: target } = await admin.from('profiles').select('role, display_name, email').eq('id', id).single();
+    if (!target) return json({ error: 'Employee not found.' }, 404);
+    if (target.role === 'owner') return json({ error: "Owner logins can't be deleted here." }, 403);
+
     const { error: deleteErr } = await admin.auth.admin.deleteUser(id);
     if (deleteErr) return json({ error: deleteErr.message }, 400);
 
@@ -138,6 +164,8 @@ Deno.serve(async (req) => {
     // that constraint isn't present on however this project's live
     // database actually looks today.
     await admin.from('profiles').delete().eq('id', id);
+
+    await logEmployeeEvent('delete', id, { display_name: target.display_name, email: target.email, role: target.role });
 
     return json({ ok: true });
   }

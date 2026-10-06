@@ -37,13 +37,9 @@ export default function CustomerModal() {
     if (!name || !contact || saving) return;
     setSaving(true);
     const input = { name, contact, address: address || undefined, gstin: gstin || undefined };
-    if (editingCustomerId) {
-      await updateCustomer(editingCustomerId, input);
-    } else {
-      await addCustomer(input);
-    }
+    const ok = editingCustomerId ? await updateCustomer(editingCustomerId, input) : Boolean(await addCustomer(input));
     setSaving(false);
-    closeCustomerModal();
+    if (ok) closeCustomerModal();
   };
 
   return (

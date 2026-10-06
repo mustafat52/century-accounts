@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useInventory } from '../../context/InventoryContext';
 import { supabase } from '../../lib/supabaseClient';
 import { formatFractionInches } from '../../lib/fractionInches';
+import { textFitsWidth } from '../../lib/sheetGrouping';
 
 // This page is deliberately self-contained rather than routed through
 // InventoryContext: it's read-only, paginated, and only ever needed once
@@ -132,10 +133,6 @@ async function fetchJobsPage(offset: number): Promise<{ jobs: Omit<HistoryJob, '
   });
 
   return { jobs, hasMore: jobRows.length === PAGE_SIZE };
-}
-
-function textFitsWidth(text: string, availableWidthIn: number, fontSizeIn: number): boolean {
-  return text.length * fontSizeIn * 0.6 <= availableWidthIn * 0.95;
 }
 
 function HistorySheetDiagram({ sheet }: { sheet: HistorySheet }) {

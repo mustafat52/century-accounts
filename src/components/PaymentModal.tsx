@@ -2,11 +2,7 @@ import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import type { PaymentMethod } from '../types';
 import { PAYMENT_METHOD_LABELS } from '../types';
-import { formatINR, capitalizeFirst } from '../utils/format';
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+import { formatINR, capitalizeFirst, todayLocal } from '../utils/format';
 
 // Records one installment against a quotation's running balance — this IS
 // the payment ledger (see quotation_payments in schema.sql), shown in
@@ -21,12 +17,14 @@ export default function PaymentModal() {
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<PaymentMethod>('cash');
   const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (isPaymentModalOpen) {
       setAmount('');
       setMethod('cash');
       setNote('');
+      setSaving(false);
     }
   }, [isPaymentModalOpen, paymentModalQuotationDbId]);
 
@@ -35,8 +33,13 @@ export default function PaymentModal() {
   const amountNum = parseFloat(amount) || 0;
 
   const handleSave = async () => {
-    if (amountNum <= 0 || amountNum > quotation.balanceAmount || !paymentModalQuotationDbId) return;
-    await recordQuotationPayment(paymentModalQuotationDbId, amountNum, method, note || undefined);
+    if (amountNum <= 0 || amountNum > quotation.balanceAmount || !paymentModalQuotationDbId || saving) return;
+    setSaving(true);
+    const receipt = await recordQuotationPayment(paymentModalQuotationDbId, amountNum, method, note || undefined);
+    setSaving(false);
+    // Only close and print when the payment was really recorded — on a
+    // failure (already toasted) the modal stays open with the entry intact.
+    if (!receipt) return;
     closePaymentModal();
     // Immediately offer the printable ledger showing this payment.
     openPrint('quotation', quotation.id);
@@ -64,7 +67,7 @@ export default function PaymentModal() {
             </div>
             <div className="form-field">
               <label>Date</label>
-              <input type="text" disabled value={today()} />
+              <input type="text" disabled value={todayLocal()} />
             </div>
           </div>
 
@@ -98,8 +101,8 @@ export default function PaymentModal() {
           <button className="btn btn-ghost" onClick={closePaymentModal}>
             Cancel
           </button>
-          <button className="btn btn-primary" onClick={handleSave}>
-            Save & print receipt
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save & print receipt'}
           </button>
         </div>
       </div>

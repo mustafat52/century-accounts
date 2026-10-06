@@ -4,12 +4,12 @@ import StatCard from '../components/StatCard';
 import ExpenseModal from '../components/ExpenseModal';
 import WorkerModal from '../components/WorkerModal';
 import { useApp } from '../context/AppContext';
-import { formatINR } from '../utils/format';
+import { formatINR, todayLocal } from '../utils/format';
 import { exportAllExpenses, exportWorkerLedger, exportAllWorkersLedger } from '../utils/exportLedger';
 import type { Worker } from '../types';
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return todayLocal();
 }
 
 function currentMonthStart(): string {
@@ -51,14 +51,15 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
   const handleRecordPayment = async () => {
     if (payAmountNum <= 0 || saving) return;
     setSaving(true);
-    if (willSettle) {
-      await recordWorkerPayment(worker.id, payAmountNum, payDate, currentMonthStart(), payNote || undefined);
-    } else {
-      await logWorkerAdvance({ workerId: worker.id, amount: payAmountNum, date: payDate, note: payNote || undefined });
-    }
+    const ok = willSettle
+      ? await recordWorkerPayment(worker.id, payAmountNum, payDate, currentMonthStart(), payNote || undefined)
+      : await logWorkerAdvance({ workerId: worker.id, amount: payAmountNum, date: payDate, note: payNote || undefined });
     setSaving(false);
-    setPayAmount('');
-    setPayNote('');
+    // Keep what was typed if the save failed (error already shown).
+    if (ok) {
+      setPayAmount('');
+      setPayNote('');
+    }
   };
 
   return (
@@ -202,17 +203,8 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
 }
 
 export default function Expenses() {
-  const {
-    expenses,
-    vendorPurchases,
-    vendors,
-    workers,
-    workerAdvances,
-    workerPayments,
-    openExpenseModal,
-    openEditExpenseModal,
-    openWorkerModal,
-  } = useApp();
+  const { expenses, vendorPurchases, vendors, workers, workerAdvances, workerPayments, openExpenseModal, openWorkerModal } =
+    useApp();
   const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
   const selectedWorker = workers.find((w) => w.id === selectedWorkerId) ?? null;
 
@@ -251,7 +243,6 @@ export default function Expenses() {
                 <th>Category</th>
                 <th>Description</th>
                 <th>Amount</th>
-                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -262,6 +253,8 @@ export default function Expenses() {
               )}
               {expenses.map((e) => (
                 <tr key={e.id}>
+                  <td className="card-main">{e.description}</td>
+                  <td className="num card-amount">{formatINR(e.amount)}</td>
                   <td className="row-sub card-meta">
                     <span className="mobile-label">Date</span>
                     {e.date}
@@ -269,19 +262,6 @@ export default function Expenses() {
                   <td className="row-sub card-meta">
                     <span className="mobile-label">Category</span>
                     {e.category}
-                  </td>
-                  <td className="card-main">{e.description}</td>
-                  <td className="num card-amount">{formatINR(e.amount)}</td>
-                  <td className="card-actions desktop-only">
-                    {/* Payroll rows are written by worker advances / settlements;
-                        editing them here would desync the worker ledger. */}
-                    {e.category === 'Payslips & Wages' ? (
-                      <span className="row-sub">Via worker ledger</span>
-                    ) : (
-                      <button className="btn btn-ghost btn-small" onClick={() => openEditExpenseModal(e.id)}>
-                        Edit
-                      </button>
-                    )}
                   </td>
                 </tr>
               ))}

@@ -1,13 +1,11 @@
 import type { Quotation } from '../types';
-import { formatINR } from './format';
+import { formatINR, addDaysLocal } from './format';
 
 // The 30-day due/overdue clock always runs from the quotation's creation
 // date (quotations_effective in schema.sql) — computed the same way here
 // purely for the reminder text, never stored.
 function dueDateFor(quotation: Quotation): string {
-  const d = new Date(quotation.date);
-  d.setDate(d.getDate() + 30);
-  return d.toISOString().slice(0, 10);
+  return addDaysLocal(quotation.date, 30);
 }
 
 export function buildReminderMessage(quotation: Quotation, customerName: string): string {

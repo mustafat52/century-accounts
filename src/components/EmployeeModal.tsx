@@ -55,7 +55,7 @@ export default function EmployeeModal({ isOpen, onClose }: EmployeeModalProps) {
   };
 
   return (
-    <div className="modal-overlay is-open" onClick={handleClose}>
+    <div className="modal-overlay is-open">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3>New Employee Login</h3>

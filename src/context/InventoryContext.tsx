@@ -5,6 +5,7 @@ import { mapStockCategory, mapStockLine, mapWasteLine } from '../lib/inventoryMa
 import { generateCuttingPlan, type Piece, type AvailableStock, type PlanResult } from '../lib/cuttingAlgorithm';
 import { guardMobile } from '../lib/mobileGuard';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useApp } from './AppContext';
 
 export interface CuttingJobItemInput {
   lengthIn: number;
@@ -29,8 +30,8 @@ interface InventoryContextValue {
   deleteCategory: (id: string) => Promise<boolean>;
 
   addStockLine: (input: NewStockLineInput) => Promise<StockLine | null>;
-  updateStockQuantity: (id: string, quantity: number) => Promise<void>;
-  deleteStockLine: (id: string) => Promise<void>;
+  updateStockQuantity: (id: string, quantity: number) => Promise<boolean>;
+  deleteStockLine: (id: string) => Promise<boolean>;
 
   // ---------- Cutting plan (Phase 2) ----------
   // generatePlan is a pure preview — it reads the current in-memory
@@ -56,6 +57,7 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
   const [wasteLines, setWasteLines] = useState<WasteLine[]>([]);
   const [dataLoading, setDataLoading] = useState(false);
   const isMobileView = useIsMobile();
+  const { showToast } = useApp();
 
   const refreshCategories = useCallback(async () => {
     const { data } = await supabase.from('inv_categories').select('*').order('name');
@@ -134,16 +136,26 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
     return newLine;
   };
 
-  const updateStockQuantity = async (id: string, quantity: number) => {
+  const updateStockQuantity = async (id: string, quantity: number): Promise<boolean> => {
     const { error } = await supabase.from('inv_stock').update({ quantity }).eq('id', id);
-    if (error) return;
+    if (error) {
+      console.error('[Updating stock quantity]', error);
+      showToast(`Updating stock quantity failed: ${error.message}`, 'error');
+      return false;
+    }
     setStockLines((prev) => prev.map((s) => (s.id === id ? { ...s, quantity } : s)));
+    return true;
   };
 
-  const deleteStockLine = async (id: string) => {
+  const deleteStockLine = async (id: string): Promise<boolean> => {
     const { error } = await supabase.from('inv_stock').delete().eq('id', id);
-    if (error) return;
+    if (error) {
+      console.error('[Removing stock line]', error);
+      showToast(`Removing stock line failed: ${error.message}`, 'error');
+      return false;
+    }
     setStockLines((prev) => prev.filter((s) => s.id !== id));
+    return true;
   };
 
   // ---------- Cutting plan ----------

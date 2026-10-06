@@ -25,9 +25,9 @@ export default function VendorPaymentModal({ vendor, onClose }: { vendor: Vendor
   const handleSave = async () => {
     if (amountNum <= 0 || overpaying || saving) return;
     setSaving(true);
-    await recordVendorPayment(vendor.id, amountNum, note || undefined);
+    const ok = await recordVendorPayment(vendor.id, amountNum, note || undefined);
     setSaving(false);
-    onClose();
+    if (ok) onClose();
   };
 
   return (

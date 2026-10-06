@@ -31,6 +31,12 @@ export default function Sidebar() {
             <span className="nav-label">Employee Control</span>
           </NavLink>
         )}
+        {currentUserRole === 'owner' && (
+          <NavLink to="/activity-log" className={({ isActive }) => `nav-item${isActive ? ' is-active' : ''}`}>
+            <span className="nav-seam" />
+            <span className="nav-label">Activity Log</span>
+          </NavLink>
+        )}
       </nav>
 
       <div className="sidebar-foot">
@@ -51,7 +57,6 @@ export default function Sidebar() {
         <button className="btn btn-ghost btn-small" onClick={logout} style={{ width: '100%' }}>
           Log out
         </button>
-        <span className="build-tag">Demo build · Phase 1</span>
       </div>
     </aside>
   );

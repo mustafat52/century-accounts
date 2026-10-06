@@ -23,12 +23,10 @@ export default function WorkerModal() {
   const handleSave = async () => {
     const salaryNum = parseFloat(salary) || 0;
     if (!name || salaryNum <= 0) return;
-    if (editingWorkerId) {
-      await updateWorker(editingWorkerId, { name, monthlySalary: salaryNum });
-    } else {
-      await addWorker({ name, monthlySalary: salaryNum });
-    }
-    closeWorkerModal();
+    const ok = editingWorkerId
+      ? await updateWorker(editingWorkerId, { name, monthlySalary: salaryNum })
+      : await addWorker({ name, monthlySalary: salaryNum });
+    if (ok) closeWorkerModal();
   };
 
   return (
