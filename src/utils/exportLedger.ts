@@ -382,6 +382,45 @@ export function exportReportsSnapshot(input: ReportsSnapshotInput) {
   XLSX.writeFile(wb, `Century_Glass_Art_Report_${safePeriod}.xlsx`);
 }
 
+// Final report for a "Close Month": general expenses only (payroll rows
+// included — they're ordinary expense rows), exactly the set about to be
+// archived. Throws if the file can't be generated, so the caller can stop
+// before archiving anything.
+export function exportExpenseCloseReport(expenses: Expense[], archivedAt?: string) {
+  if (expenses.length === 0) throw new Error('No expenses to export.');
+  const rows = [...expenses].sort((a, b) => (a.date < b.date ? 1 : -1));
+  const from = rows[rows.length - 1].date;
+  const to = rows[0].date;
+
+  const totalsByCategory = new Map<string, number>();
+  rows.forEach((r) => totalsByCategory.set(r.category, (totalsByCategory.get(r.category) ?? 0) + r.amount));
+  const grandTotal = rows.reduce((sum, r) => sum + r.amount, 0);
+
+  const wb = XLSX.utils.book_new();
+  const summaryAoa: (string | number)[][] = [
+    ['Century Glass Art — Expense Report'],
+    ['Period', `${from} to ${to}`],
+    ['Closed on', (archivedAt ? new Date(archivedAt) : new Date()).toLocaleDateString('en-IN')],
+    ['Number of expenses', rows.length],
+    [],
+    ['Category', 'Total'],
+    ...Array.from(totalsByCategory.entries()).sort((a, b) => b[1] - a[1]),
+    [],
+    ['Grand Total', grandTotal],
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryAoa), 'Summary');
+
+  const detailData = rows.map((r) => ({
+    Date: r.date,
+    Category: r.category,
+    Description: r.description,
+    Amount: r.amount,
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detailData), 'Expenses');
+
+  XLSX.writeFile(wb, `Century_Glass_Art_Expenses_${from}_to_${to}.xlsx`);
+}
+
 export function exportAllExpenses(expenses: Expense[], vendorPurchases: VendorPurchase[], vendors: Vendor[]) {
   const vendorName = (id: string) => vendors.find((v) => v.id === id)?.name ?? 'Unknown vendor';
 

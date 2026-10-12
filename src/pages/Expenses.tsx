@@ -3,10 +3,11 @@ import Topbar from '../components/Topbar';
 import StatCard from '../components/StatCard';
 import ExpenseModal from '../components/ExpenseModal';
 import WorkerModal from '../components/WorkerModal';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { useApp } from '../context/AppContext';
 import { formatINR, todayLocal } from '../utils/format';
-import { exportAllExpenses, exportWorkerLedger, exportAllWorkersLedger } from '../utils/exportLedger';
-import type { Worker } from '../types';
+import { exportAllExpenses, exportExpenseCloseReport, exportWorkerLedger, exportAllWorkersLedger } from '../utils/exportLedger';
+import type { Expense, Worker } from '../types';
 
 function today(): string {
   return todayLocal();
@@ -203,10 +204,51 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
 }
 
 export default function Expenses() {
-  const { expenses, vendorPurchases, vendors, workers, workerAdvances, workerPayments, openExpenseModal, openWorkerModal } =
-    useApp();
+  const {
+    expenses: allExpenses,
+    vendorPurchases,
+    vendors,
+    workers,
+    workerAdvances,
+    workerPayments,
+    openExpenseModal,
+    openWorkerModal,
+    archiveExpenses,
+    showToast,
+  } = useApp();
   const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
   const selectedWorker = workers.find((w) => w.id === selectedWorkerId) ?? null;
+  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
+
+  // Archived rows (see "Close Month") are hidden from this page only —
+  // Reports and the dashboard still read the full list from context, so
+  // closing a month never changes any historical figure.
+  const expenses = useMemo(() => allExpenses.filter((e) => !e.archivedAt), [allExpenses]);
+
+  // Every closed month, newest first. Rows closed in one click share the
+  // exact same archivedAt value, so that timestamp is the group key.
+  const archivedMonths = useMemo(() => {
+    const groups = new Map<string, Expense[]>();
+    allExpenses.forEach((e) => {
+      if (!e.archivedAt) return;
+      const list = groups.get(e.archivedAt) ?? [];
+      list.push(e);
+      groups.set(e.archivedAt, list);
+    });
+    return Array.from(groups.entries())
+      .map(([archivedAt, items]) => {
+        const dates = items.map((i) => i.date).sort();
+        return {
+          archivedAt,
+          items,
+          from: dates[0],
+          to: dates[dates.length - 1],
+          total: items.reduce((sum, i) => sum + i.amount, 0),
+        };
+      })
+      .sort((a, b) => (a.archivedAt < b.archivedAt ? 1 : -1));
+  }, [allExpenses]);
 
   const byCategory = useMemo(() => {
     const map = new Map<string, number>();
@@ -215,6 +257,31 @@ export default function Expenses() {
   }, [expenses]);
 
   const totalGeneral = expenses.reduce((sum, e) => sum + e.amount, 0);
+
+  // Download first, archive second: if the report can't even be generated
+  // nothing is archived. (A browser can't confirm the file was actually
+  // saved, which is why every closed month stays re-downloadable below.)
+  const handleCloseMonth = async () => {
+    const toClose = expenses;
+    if (toClose.length === 0) {
+      setConfirmCloseOpen(false);
+      return;
+    }
+    setClosing(true);
+    try {
+      exportExpenseCloseReport(toClose);
+    } catch (err) {
+      console.error('[Close month] report failed', err);
+      showToast('Could not generate the report, so nothing was cleared.', 'error');
+      setClosing(false);
+      setConfirmCloseOpen(false);
+      return;
+    }
+    const archivedAt = await archiveExpenses(toClose.map((e) => e.id));
+    setClosing(false);
+    setConfirmCloseOpen(false);
+    if (archivedAt) showToast(`Month closed — ${toClose.length} expenses archived. The report was downloaded.`, 'success');
+  };
 
   return (
     <>
@@ -226,9 +293,16 @@ export default function Expenses() {
             <div style={{ display: 'flex', gap: 8 }}>
               <button
                 className="btn btn-ghost btn-small"
-                onClick={() => exportAllExpenses(expenses, vendorPurchases, vendors)}
+                onClick={() => exportAllExpenses(allExpenses, vendorPurchases, vendors)}
               >
                 Export Full Report (Excel)
+              </button>
+              <button
+                className="btn btn-ghost btn-small desktop-only"
+                onClick={() => setConfirmCloseOpen(true)}
+                disabled={expenses.length === 0}
+              >
+                Close Month
               </button>
               <button className="btn btn-primary btn-small desktop-only" onClick={openExpenseModal}>
                 + New Expense
@@ -248,7 +322,11 @@ export default function Expenses() {
             <tbody>
               {expenses.length === 0 && (
                 <tr>
-                  <td className="row-sub">No general expenses recorded yet.</td>
+                  <td className="row-sub">
+                    {archivedMonths.length > 0
+                      ? 'No open expenses — the last month was closed. New expenses will appear here.'
+                      : 'No general expenses recorded yet.'}
+                  </td>
                 </tr>
               )}
               {expenses.map((e) => (
@@ -287,6 +365,53 @@ export default function Expenses() {
           </table>
           </div>
         </div>
+
+        {archivedMonths.length > 0 && (
+          <div className="panel">
+            <div className="panel-head">
+              <h3>Closed months</h3>
+            </div>
+            <div className="table-scroll">
+              <table className="table-cards">
+                <thead>
+                  <tr>
+                    <th>Period</th>
+                    <th>Closed on</th>
+                    <th>Expenses</th>
+                    <th>Total</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {archivedMonths.map((m) => (
+                    <tr key={m.archivedAt}>
+                      <td className="card-main">
+                        {m.from} to {m.to}
+                      </td>
+                      <td className="row-sub card-meta">
+                        <span className="mobile-label">Closed</span>
+                        {new Date(m.archivedAt).toLocaleDateString('en-IN')}
+                      </td>
+                      <td className="row-sub card-meta">
+                        <span className="mobile-label">Count</span>
+                        {m.items.length}
+                      </td>
+                      <td className="num card-amount">{formatINR(m.total)}</td>
+                      <td className="card-actions">
+                        <button
+                          className="btn btn-ghost btn-small"
+                          onClick={() => exportExpenseCloseReport(m.items, m.archivedAt)}
+                        >
+                          Download Report
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         <div className="panel">
           <div className="panel-head">
@@ -341,6 +466,14 @@ export default function Expenses() {
         </div>
       </div>
 
+      <ConfirmDialog
+        open={confirmCloseOpen}
+        title="Close this month's expenses?"
+        message={`This downloads a final report of ${expenses.length} expense${expenses.length !== 1 ? 's' : ''} (${formatINR(totalGeneral)}, payroll included) and then clears them from this page so new ones can be recorded. Nothing is deleted: Reports and the dashboard keep counting them, and the report can be downloaded again from Closed months.`}
+        confirmLabel={closing ? 'Closing…' : 'Download & Close Month'}
+        onConfirm={handleCloseMonth}
+        onCancel={() => !closing && setConfirmCloseOpen(false)}
+      />
       <ExpenseModal />
       <WorkerModal />
       <WorkerDetailModal worker={selectedWorker} onClose={() => setSelectedWorkerId(null)} />

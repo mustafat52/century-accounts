@@ -150,6 +150,7 @@ export function mapExpense(row: any): Expense {
     description: row.description,
     amount: Number(row.amount),
     date: row.expense_date,
+    archivedAt: row.archived_at ?? undefined,
   };
 }
 

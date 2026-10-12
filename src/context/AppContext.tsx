@@ -220,6 +220,11 @@ interface AppContextValue {
 
   expenses: Expense[];
   addExpense: (input: NewExpenseInput) => Promise<boolean>;
+  // "Close Month": stamps the given expenses as archived (hidden from the
+  // Expenses page, still counted everywhere else). Returns the archive
+  // timestamp on success so the caller can tie it to the report it just
+  // downloaded, or null on failure.
+  archiveExpenses: (expenseIds: string[]) => Promise<string | null>;
 
   vendorPurchases: VendorPurchase[];
   vendorPayments: VendorPayment[];
@@ -873,6 +878,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     setExpenses((prev) => [mapExpense(data), ...prev]);
     return true;
+  };
+
+  // Archives exactly the expenses that were in the report just downloaded
+  // (by id, not by date range), so an expense another user adds in the
+  // meantime is never swept away without being in the backup. Every row
+  // gets the same archived_at value; that shared timestamp is what groups
+  // them into one "closed month" later. Done in chunks to keep each
+  // request's URL a sane length.
+  const archiveExpenses = async (expenseIds: string[]): Promise<string | null> => {
+    if (expenseIds.length === 0) return null;
+    const archivedAt = new Date().toISOString();
+    const CHUNK = 100;
+    for (let i = 0; i < expenseIds.length; i += CHUNK) {
+      const chunk = expenseIds.slice(i, i + CHUNK);
+      const { error } = await supabase
+        .from('expenses')
+        .update({ archived_at: archivedAt })
+        .in('id', chunk)
+        .is('vendor_id', null)
+        .is('archived_at', null);
+      if (error) {
+        reportError('Closing the month', error);
+        // Whatever was archived before the failure stays archived (and is
+        // in the downloaded report); show the real state rather than guess.
+        await refreshExpenses();
+        return null;
+      }
+    }
+    const idSet = new Set(expenseIds);
+    setExpenses((prev) => prev.map((e) => (idSet.has(e.id) ? { ...e, archivedAt } : e)));
+    return archivedAt;
   };
 
   // ---------- Vendor purchases ----------
@@ -1573,6 +1609,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       updateVendor: guardMobile(updateVendor, isMobileView),
       expenses,
       addExpense: guardMobile(addExpense, isMobileView),
+      archiveExpenses: guardMobile(archiveExpenses, isMobileView),
       vendorPurchases,
       vendorPayments,
       addVendorPurchase: guardMobile(addVendorPurchase, isMobileView),

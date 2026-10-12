@@ -135,6 +135,11 @@ export interface Expense {
   description: string;
   amount: number;
   date: string;
+  // Set when the expense was swept out of the Expenses page by "Close
+  // Month". All rows closed together share the exact same timestamp, which
+  // is how the Archived Months list groups them. Archived rows are still
+  // counted by Reports and the dashboard — only the Expenses page hides them.
+  archivedAt?: string;
 }
 
 
