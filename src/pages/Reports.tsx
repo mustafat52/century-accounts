@@ -7,10 +7,13 @@ import { exportReportsSnapshot } from '../utils/exportLedger';
 import type { InvoiceSlab } from '../types';
 import { SLAB_DISCOUNT_PERCENT } from '../types';
 
-type PeriodKey = 'month' | '3m' | '6m' | 'year' | 'custom';
+type PeriodKey = 'month' | 'lastMonth' | '3m' | '6m' | 'year' | 'custom';
 
 const PERIODS: Array<{ key: Exclude<PeriodKey, 'custom'>; label: string; monthsBack: number; chartSlice: number }> = [
   { key: 'month', label: 'This Month', monthsBack: 0, chartSlice: 1 },
+  // Handled as a fixed one-month range (the previous calendar month) —
+  // monthsBack/chartSlice are unused for it, see isRangePeriod below.
+  { key: 'lastMonth', label: 'Last Month', monthsBack: 1, chartSlice: 1 },
   { key: '3m', label: 'Last 3 Months', monthsBack: 2, chartSlice: 3 },
   { key: '6m', label: 'Last 6 Months', monthsBack: 5, chartSlice: 6 },
   { key: 'year', label: 'This Year', monthsBack: 12, chartSlice: 6 },
@@ -26,6 +29,14 @@ function periodStart(anchor: string, period: Exclude<PeriodKey, 'custom'>): stri
   const cfg = PERIODS.find((p) => p.key === period)!;
   const d = new Date(y, m - 1 - cfg.monthsBack, 1);
   return formatLocalDate(d);
+}
+
+// The previous calendar month relative to TODAY (not the latest data date),
+// so "Last Month" always means the real previous month.
+function previousMonthValue(): string {
+  const d = new Date();
+  const prev = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+  return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`;
 }
 
 function currentMonthValue(): string {
@@ -90,13 +101,17 @@ export default function Reports() {
     [invoices, expenses, quotations]
   );
 
+  // 'custom' and 'lastMonth' are both bounded month ranges (From/To);
+  // the other presets run open-ended up to today.
+  const isRangePeriod = period === 'custom' || period === 'lastMonth';
+  const rangeFrom = period === 'lastMonth' ? previousMonthValue() : customFrom;
+  const rangeTo = period === 'lastMonth' ? previousMonthValue() : customTo;
+
   const start = useMemo(
-    () => (period === 'custom' ? monthStartOf(customFrom) : periodStart(anchor, period)),
-    [anchor, period, customFrom]
+    () => (period === 'custom' || period === 'lastMonth' ? monthStartOf(rangeFrom) : periodStart(anchor, period)),
+    [anchor, period, rangeFrom]
   );
-  // Only meaningful for 'custom' — preset periods run open-ended up to
-  // today, same as before this feature existed.
-  const end = period === 'custom' ? monthEnd(customTo) : null;
+  const end = isRangePeriod ? monthEnd(rangeTo) : null;
 
   const periodLabel = useMemo(() => {
     if (period !== 'custom') return PERIODS.find((p) => p.key === period)!.label;
@@ -110,12 +125,12 @@ export default function Reports() {
   // revenue, same rule as the view) and the full expense set (general +
   // vendor purchases together, matching what the view itself sums).
   const chartData = useMemo(() => {
-    if (period !== 'custom') {
+    if (period !== 'custom' && period !== 'lastMonth') {
       const n = PERIODS.find((p) => p.key === period)!.chartSlice;
       return monthlyFigures.slice(-n);
     }
 
-    const months = monthsBetween(customFrom, customTo);
+    const months = monthsBetween(rangeFrom, rangeTo);
     return months.map((monthValue) => {
       const mStart = monthStartOf(monthValue);
       const mEnd = monthEnd(monthValue);
@@ -130,7 +145,7 @@ export default function Reports() {
         .reduce((sum, v) => sum + v.amount, 0);
       return { month: monthLabel(monthValue), revenue, expenses: generalExpenses + vendorExpenses };
     });
-  }, [period, monthlyFigures, customFrom, customTo, quotationPayments, expenses, vendorPurchases]);
+  }, [period, monthlyFigures, rangeFrom, rangeTo, quotationPayments, expenses, vendorPurchases]);
 
   const totals = useMemo(() => {
     const revenue = chartData.reduce((sum, m) => sum + m.revenue, 0);
