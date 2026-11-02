@@ -294,8 +294,8 @@ export default function Invoicing() {
                 <tr>
                   <th>Invoice</th>
                   <th>Customer</th>
-                  <th>Description</th>
-                  <th>Amount</th>
+                  <th>Total Amount</th>
+                  <th>Amount Pending</th>
                   <th>Date</th>
                   <th></th>
                 </tr>
@@ -324,21 +324,22 @@ export default function Invoicing() {
                         </div>
                       )}
                       {i.transportation > 0 && <div className="row-sub">+ Transport {formatINR(i.transportation)}</div>}
-                      {src && (
-                        <div style={{ marginTop: 4 }}>
-                          <span className={`badge ${hasBalance ? 'due' : 'paid'}`}>
-                            {hasBalance ? (src.paidAmount > 0 ? 'Balance due · Partial' : 'Balance due') : 'Paid'}
-                          </span>
-                          <div className="row-sub">
-                            Paid {formatINR(src.paidAmount)}
-                            {hasBalance && ` · Bal ${formatINR(src.balanceAmount)}`}
-                          </div>
-                        </div>
-                      )}
                     </td>
-                    <td className="row-sub card-line">
-                      {i.description}
-                      {i.items.length > 1 && <div className="row-sub">{i.items.length} items</div>}
+                    <td className="num card-amount">
+                      {src ? (
+                        <>
+                          <span className="mobile-label">Pending</span>
+                          {formatINR(src.balanceAmount)}
+                          <div style={{ marginTop: 4 }}>
+                            <span className={`badge ${hasBalance ? 'due' : 'paid'}`}>
+                              {hasBalance ? (src.paidAmount > 0 ? 'Balance due · Partial' : 'Balance due') : 'Paid'}
+                            </span>
+                          </div>
+                          <div className="row-sub">Paid {formatINR(src.paidAmount)}</div>
+                        </>
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td className="row-sub card-meta">
                       <span className="mobile-label">Date</span>
