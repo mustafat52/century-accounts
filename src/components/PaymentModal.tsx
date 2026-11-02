@@ -6,8 +6,9 @@ import { formatINR, capitalizeFirst, todayLocal } from '../utils/format';
 
 // Records one installment against a quotation's running balance — this IS
 // the payment ledger (see quotation_payments in schema.sql), shown in
-// full on the Ledger printable. Nothing gets recorded against an invoice
-// anymore; by the time something becomes an invoice it's already settled.
+// full on the Ledger printable. Invoices never hold payments themselves:
+// an invoice's "Record Payment" (Invoicing page) opens this modal for its
+// SOURCE quotation, so converted bills with a balance are collected here too.
 export default function PaymentModal() {
   const { isPaymentModalOpen, paymentModalQuotationDbId, closePaymentModal, quotations, recordQuotationPayment, openPrint } =
     useApp();
@@ -91,7 +92,9 @@ export default function PaymentModal() {
           {amountNum > 0 && (
             <div className="row-sub">
               {amountNum >= quotation.balanceAmount
-                ? 'This fully settles the bill — it can then be converted to an invoice.'
+                ? quotation.status === 'converted'
+                  ? 'This fully settles the bill.'
+                  : 'This fully settles the bill — it can then be converted to an invoice.'
                 : `Remaining balance after this: ${formatINR(quotation.balanceAmount - amountNum)}`}
             </div>
           )}

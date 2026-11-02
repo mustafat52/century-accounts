@@ -23,6 +23,13 @@ const STATUS_FILTERS: Array<{ key: QuotationFilter; label: string }> = [
   { key: 'paid', label: 'Paid' },
 ];
 
+type InvoiceFilter = 'all' | 'outstanding';
+
+const INVOICE_FILTERS: Array<{ key: InvoiceFilter; label: string }> = [
+  { key: 'all', label: 'All' },
+  { key: 'outstanding', label: 'Balance due' },
+];
+
 export default function Invoicing() {
   const {
     invoices,
@@ -45,9 +52,18 @@ export default function Invoicing() {
   const [searchParams, setSearchParams] = useSearchParams();
   // Quotations is the default tab now — it's where all the live work
   // (payments, due/overdue, convert) actually happens. Invoices is just a
-  // read-only archive of already-settled bills.
+  // read-only archive of invoiced bills — any balance still owed on them
+  // is collected here too (it posts to the source quotation's ledger).
   const tab: 'invoices' | 'quotations' = searchParams.get('tab') === 'invoices' ? 'invoices' : 'quotations';
   const setTab = (t: 'invoices' | 'quotations') => setSearchParams(t === 'quotations' ? {} : { tab: t });
+  const invFilter: InvoiceFilter = searchParams.get('inv') === 'outstanding' ? 'outstanding' : 'all';
+  const setInvFilter = (f: InvoiceFilter) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('tab', 'invoices');
+    if (f === 'all') next.delete('inv');
+    else next.set('inv', f);
+    setSearchParams(next);
+  };
   const filter = (searchParams.get('status') as QuotationFilter) || 'all';
   const setFilter = (f: QuotationFilter) => {
     const next = new URLSearchParams(searchParams);
@@ -70,13 +86,25 @@ export default function Invoicing() {
     customerName(custId).toLowerCase().includes(query) ||
     description.toLowerCase().includes(query);
 
+  // Payments live on the SOURCE quotation (quotation_payments), so every
+  // invoice resolves its payment state through this lookup, and every
+  // converted quotation resolves its invoice number through the other.
+  const quotationByDbId = useMemo(() => new Map(quotations.map((q) => [q.dbId, q])), [quotations]);
+  const invoiceByDbId = useMemo(() => new Map(invoices.map((i) => [i.dbId, i])), [invoices]);
+
   const sortedInvoices = useMemo(
     () =>
       [...invoices]
-        .filter((i) => matchesSearch(i.id, i.customerId, i.description))
+        .filter((i) => {
+          const src = i.sourceQuotationId ? quotationByDbId.get(i.sourceQuotationId) : undefined;
+          if (invFilter === 'outstanding' && !(src && src.balanceAmount > 0)) return false;
+          // Also match the source quotation's number, so either number
+          // finds the bill.
+          return matchesSearch(i.id, i.customerId, i.description) || (!!query && !!src && src.id.toLowerCase().includes(query));
+        })
         .sort((a, b) => (a.date < b.date ? 1 : -1)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [invoices, query, customers]
+    [invoices, quotationByDbId, invFilter, query, customers]
   );
 
   const filteredQuotations = useMemo(
@@ -117,7 +145,7 @@ export default function Invoicing() {
               Quotations
             </button>
             <button className={`chip${tab === 'invoices' ? ' is-active' : ''}`} onClick={() => setTab('invoices')}>
-              Invoices (settled)
+              Invoices
             </button>
           </div>
           <input
@@ -169,7 +197,12 @@ export default function Invoicing() {
                   )}
                   {filteredQuotations.map((q) => (
                     <tr key={q.id}>
-                      <td className="card-tag">{q.id}</td>
+                      <td className="card-tag">
+                        {q.id}
+                        {q.convertedInvoiceId && invoiceByDbId.get(q.convertedInvoiceId) && (
+                          <div className="row-sub">Invoiced as {invoiceByDbId.get(q.convertedInvoiceId)!.id}</div>
+                        )}
+                      </td>
                       <td className="card-tag-muted">{customerName(q.customerId)}</td>
                       <td className="num card-amount">
                         {formatINR(q.grandTotal)}
@@ -237,6 +270,18 @@ export default function Invoicing() {
         )}
 
         {tab === 'invoices' && (
+          <>
+          <div className="chip-row">
+            {INVOICE_FILTERS.map((f) => (
+              <button
+                key={f.key}
+                className={`chip${invFilter === f.key ? ' is-active' : ''}`}
+                onClick={() => setInvFilter(f.key)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
           <div className="panel">
             <div className="panel-head">
               <h3>
@@ -261,9 +306,15 @@ export default function Invoicing() {
                     <td className="row-sub">{query ? `No invoices match “${search}”.` : 'No invoices yet — a quotation becomes one when you convert it.'}</td>
                   </tr>
                 )}
-                {sortedInvoices.map((i) => (
+                {sortedInvoices.map((i) => {
+                  const src = i.sourceQuotationId ? quotationByDbId.get(i.sourceQuotationId) : undefined;
+                  const hasBalance = !!src && src.balanceAmount > 0;
+                  return (
                   <tr key={i.id}>
-                    <td className="card-tag">{i.id}</td>
+                    <td className="card-tag">
+                      {i.id}
+                      {src && <div className="row-sub">From {src.id}</div>}
+                    </td>
                     <td className="card-tag-muted">{customerName(i.customerId)}</td>
                     <td className="num card-amount">
                       {formatINR(i.amount - i.discountAmount + i.gst + i.transportation)}
@@ -273,6 +324,17 @@ export default function Invoicing() {
                         </div>
                       )}
                       {i.transportation > 0 && <div className="row-sub">+ Transport {formatINR(i.transportation)}</div>}
+                      {src && (
+                        <div style={{ marginTop: 4 }}>
+                          <span className={`badge ${hasBalance ? 'due' : 'paid'}`}>
+                            {hasBalance ? (src.paidAmount > 0 ? 'Balance due · Partial' : 'Balance due') : 'Paid'}
+                          </span>
+                          <div className="row-sub">
+                            Paid {formatINR(src.paidAmount)}
+                            {hasBalance && ` · Bal ${formatINR(src.balanceAmount)}`}
+                          </div>
+                        </div>
+                      )}
                     </td>
                     <td className="row-sub card-line">
                       {i.description}
@@ -287,6 +349,16 @@ export default function Invoicing() {
                       <button className="btn btn-ghost btn-small" onClick={() => openPrint('invoice', i.id)}>
                         Print
                       </button>
+                      {src && (
+                        <button className="btn btn-ghost btn-small" onClick={() => openPrint('ledger', src.id)}>
+                          Ledger
+                        </button>
+                      )}
+                      {src && hasBalance && (
+                        <button className="btn btn-primary btn-small desktop-only" onClick={() => openPaymentModal(src.dbId)}>
+                          Record Payment
+                        </button>
+                      )}
                       {i.sourceQuotationId && (
                         <button className="btn btn-ghost btn-small desktop-only" onClick={() => setRollbackTarget(i)}>
                           Roll back to Quotation
@@ -295,11 +367,13 @@ export default function Invoicing() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
           </div>
+          </>
         )}
       </div>
       <PaymentModal />
