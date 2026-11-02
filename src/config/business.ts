@@ -14,3 +14,11 @@ export const BUSINESS = {
     ifsc: 'KKBK0007452',
   },
 } as const;
+
+// Inventory / cutting rules. Edit here once.
+export const INVENTORY = {
+  // Leftover glass with a side shorter than this (inches) is treated as
+  // trim/scrap, not logged as a reusable offcut in the waste ledger. It
+  // still shows on the cutting diagram as "trim, too irregular to log".
+  minOffcutIn: 3,
+} as const;

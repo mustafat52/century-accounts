@@ -112,6 +112,58 @@ const stockOf = (l: number, w: number, q = 50, origin: 'fresh' | 'waste' = 'fres
   check(plan.unfulfillable.length > 0, 'pieces that no longer fit in stock must be reported');
 }
 
+{
+  // fluted glass: a piece that only fits ROTATED must be refused when rotation is off
+  const stock = [stockOf(40, 80, 5)];
+  const free: Piece[] = [{ id: 'f:0', lengthIn: 60, widthIn: 20 }];
+  const planFree = generateCuttingPlan(free, stock);
+  check(planFree.sheets.length === 1 && planFree.sheets[0].placedPieces[0].rotated, 'a 60x20 piece fits a 40x80 sheet only when rotated');
+  const locked: Piece[] = [{ id: 'f:0', lengthIn: 60, widthIn: 20, canRotate: false }];
+  const planLocked = generateCuttingPlan(locked, stock);
+  check(planLocked.sheets.length === 0 && planLocked.unfulfillable.length === 1, 'a no-rotate piece that only fits rotated must be unfulfillable');
+}
+{
+  // fluted glass: no placed piece may ever be rotated, including from waste offcuts, and plans stay valid
+  for (let seed = 1; seed <= 40; seed++) {
+    const r = rng(seed * 13);
+    const pieces: Piece[] = [];
+    for (let t = 0; t < 2 + Math.floor(r() * 5); t++) {
+      const l = 8 + Math.floor(r() * 50), w = 6 + Math.floor(r() * 30), q = 1 + Math.floor(r() * 4);
+      const canRotate = r() < 0.5;
+      for (let i = 0; i < q; i++) pieces.push({ id: `${t}:${i}`, lengthIn: l, widthIn: w, canRotate });
+    }
+    const stock = [stockOf(120, 84, 50, 'fresh', 'F'), stockOf(50, 40, 1, 'waste', 'W')];
+    const plan = generateCuttingPlan(pieces, stock, { seed });
+    validate(plan, pieces, `no-rotate #${seed}`);
+    for (const s of plan.sheets) for (const p of s.placedPieces) {
+      const src = pieces.find((x) => x.id === p.pieceId)!;
+      check(src.canRotate !== false || !p.rotated, `no-rotate #${seed}: a locked piece was rotated`);
+    }
+  }
+}
+{
+  // minimum offcut size: slivers are not reported, real offcuts still are, and nothing overlaps
+  const pieces: Piece[] = [{ id: 's:0', lengthIn: 59.98, widthIn: 39.99 }];
+  const loose = generateCuttingPlan(pieces, [stockOf(60, 40, 1)]);
+  check(loose.sheets[0].leftoverRegions.length > 0, 'without a minimum, the sliver is reported (documents the old behaviour)');
+  const strict = generateCuttingPlan(pieces, [stockOf(60, 40, 1)], { minOffcutIn: 3 });
+  check(strict.sheets[0].leftoverRegions.length === 0, 'a 0.02in sliver must not be reported as an offcut');
+
+  const big: Piece[] = [{ id: 'o:0', lengthIn: 30, widthIn: 30 }];
+  const plan = generateCuttingPlan(big, [stockOf(96, 72, 1)], { minOffcutIn: 3 });
+  check(plan.sheets[0].leftoverRegions.length > 0, 'a large offcut must still be reported');
+  for (const reg of plan.sheets[0].leftoverRegions) check(Math.min(reg.widthIn, reg.lengthIn) >= 3, 'every reported offcut must meet the minimum size');
+}
+{
+  // repeatability: default settings (no clock cap) give an identical plan every time
+  const r = rng(77);
+  const pieces: Piece[] = Array.from({ length: 80 }, (_, i) => ({ id: `d:${i}`, lengthIn: 8 + Math.floor(r() * 50), widthIn: 6 + Math.floor(r() * 34) }));
+  const stock = [stockOf(120, 84, 99, 'fresh', 'A'), stockOf(144, 96, 99, 'fresh', 'B')];
+  const a = JSON.stringify(generateCuttingPlan(pieces, stock));
+  const b = JSON.stringify(generateCuttingPlan(pieces, stock));
+  check(a === b, 'the same input must always produce the same plan');
+}
+
 // ---- random orders: every plan must be physically valid ----
 const sizes = [[96, 72], [120, 84], [144, 96]];
 const t0 = Date.now();

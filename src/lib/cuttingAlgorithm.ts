@@ -35,12 +35,24 @@
 // holds its layout.
 //
 // Coordinates: x runs along a sheet's WIDTH, y along its LENGTH.
+//
+// Rotation: pieces may be rotated 90 degrees unless `canRotate` is false
+// (patterned / fluted glass, where the pattern direction must follow the
+// sheet's length). A non-rotatable piece is always placed with its length
+// along the sheet's length, in stock and in waste offcuts alike.
+//
+// Repeatability: the search is bounded by an ITERATION cap (scaled to the
+// order size), not by the wall clock, so the same input and seed always
+// give the same plan on any machine. A clock cap is still available as an
+// explicit opt-in (`timeBudgetMs`).
 
 export interface Piece {
   /** Caller-supplied id (e.g. a per-instance key derived from a job item), used to trace a placement back to its request. */
   id: string;
   lengthIn: number;
   widthIn: number;
+  /** Set to false for glass whose pattern/grain direction must be kept (e.g. fluted). Default true. */
+  canRotate?: boolean;
 }
 
 // Origin tag used only within planning, for source-preference ordering —
@@ -104,27 +116,26 @@ export interface PlanResult {
 }
 
 export interface PlanOptions {
-  /** Blade thickness lost on every cut, in inches. Default 0. */
-  kerfIn?: number;
-  /** Max milliseconds spent on the random/local search after the fixed strategy grid. Default 600. */
-  timeBudgetMs?: number;
-  /** Hard cap on search runs after the grid. Default 2000. */
-  maxIterations?: number;
-  /** Seed for the search's random generator (same input + seed = same plan when the cap, not the clock, ends the search). */
-  seed?: number;
-}
-
-
-// ---------- Options ----------
-
-export interface PlanOptions {
   /** Blade/score thickness lost per cut, in inches. Default 0. */
   kerfIn?: number;
-  /** Wall-clock cap for the search, in ms. Default 1500. */
-  timeBudgetMs?: number;
-  /** Cap on search iterations after the systematic phase. Default 8000. */
+  /**
+   * Leftover regions with a side shorter than this (inches) are not
+   * reported as reusable offcuts — they are trim/scrap. Packing itself is
+   * unaffected. Default 0 (report everything above a hundredth of an inch).
+   */
+  minOffcutIn?: number;
+  /**
+   * Cap on search iterations after the systematic phase. Default scales
+   * with order size (500000 / pieces, at most 8000, at least 200) so the
+   * result is repeatable and the run time stays about a second or less.
+   */
   maxIterations?: number;
-  /** Seed for the search's random choices (same seed = same plan). */
+  /**
+   * Optional wall-clock cap for the search, in ms. Default: none. Setting
+   * it makes the result depend on machine speed, so it is off by default.
+   */
+  timeBudgetMs?: number;
+  /** Seed for the search's random choices (same input + seed = same plan). */
   seed?: number;
 }
 
@@ -180,11 +191,13 @@ function pieceArea(p: { lengthIn: number; widthIn: number }): number {
   return p.lengthIn * p.widthIn;
 }
 
-function fitsWithinBounds(piece: { lengthIn: number; widthIn: number }, bounds: { lengthIn: number; widthIn: number }): boolean {
-  return (
-    (piece.widthIn <= bounds.widthIn + EPS && piece.lengthIn <= bounds.lengthIn + EPS) ||
-    (piece.lengthIn <= bounds.widthIn + EPS && piece.widthIn <= bounds.lengthIn + EPS)
-  );
+function fitsWithinBounds(
+  piece: { lengthIn: number; widthIn: number; canRotate?: boolean },
+  bounds: { lengthIn: number; widthIn: number }
+): boolean {
+  if (piece.widthIn <= bounds.widthIn + EPS && piece.lengthIn <= bounds.lengthIn + EPS) return true;
+  if (piece.canRotate === false) return false;
+  return piece.lengthIn <= bounds.widthIn + EPS && piece.widthIn <= bounds.lengthIn + EPS;
 }
 
 function mulberry32(seed: number): () => number {
@@ -222,6 +235,7 @@ interface Placement {
 function findBestPlacement(sheets: WorkSheet[], piece: Piece, rule: FitRule): Placement | null {
   let best: Placement | null = null;
   const square = piece.widthIn === piece.lengthIn;
+  const mayRotate = piece.canRotate !== false && !square;
   for (const sheet of sheets) {
     for (let i = 0; i < sheet.free.length; i++) {
       const r = sheet.free[i];
@@ -229,7 +243,7 @@ function findBestPlacement(sheets: WorkSheet[], piece: Piece, rule: FitRule): Pl
         const s = fitScore(r, piece.widthIn, piece.lengthIn, rule);
         if (!best || s < best.score) best = { sheet, idx: i, rotated: false, pw: piece.widthIn, pl: piece.lengthIn, score: s };
       }
-      if (!square && piece.lengthIn <= r.w + EPS && piece.widthIn <= r.l + EPS) {
+      if (mayRotate && piece.lengthIn <= r.w + EPS && piece.widthIn <= r.l + EPS) {
         const s = fitScore(r, piece.lengthIn, piece.widthIn, rule);
         if (!best || s < best.score) best = { sheet, idx: i, rotated: true, pw: piece.lengthIn, pl: piece.widthIn, score: s };
       }
@@ -492,8 +506,8 @@ function sortedBy(pieces: Piece[], key: OrderKey): Piece[] {
  */
 export function generateCuttingPlan(pieces: Piece[], availableStock: AvailableStock[], options: PlanOptions = {}): PlanResult {
   const kerf = Math.max(0, options.kerfIn ?? 0);
-  const budgetMs = options.timeBudgetMs ?? 1500;
-  const maxIterations = options.maxIterations ?? 8000;
+  const minOffcut = Math.max(0, options.minOffcutIn ?? 0);
+  const budgetMs = options.timeBudgetMs ?? Infinity;
   const rng = mulberry32(options.seed ?? 20260506);
 
   const feasible: Piece[] = [];
@@ -503,6 +517,8 @@ export function generateCuttingPlan(pieces: Piece[], availableStock: AvailableSt
     else impossible.push(p);
   }
   if (feasible.length === 0) return { sheets: [], unfulfillable: impossible };
+  const maxIterations =
+    options.maxIterations ?? Math.min(8000, Math.max(200, Math.floor(500000 / feasible.length)));
 
   const state: { best: RunResult | null } = { best: null };
   const consider = (r: RunResult) => {
@@ -563,7 +579,7 @@ export function generateCuttingPlan(pieces: Piece[], availableStock: AvailableSt
     const usedArea = ws.placed.reduce((sum, p) => sum + p.lengthIn * p.widthIn, 0);
     const totalArea = ws.lengthIn * ws.widthIn;
     const leftoverRegions: LeftoverRegion[] = ws.free
-      .filter((r) => r.w > REPORT_EPS && r.l > REPORT_EPS)
+      .filter((r) => r.w > REPORT_EPS && r.l > REPORT_EPS && Math.min(r.w, r.l) >= minOffcut)
       .map((r) => ({ xIn: r.x, yIn: r.y, widthIn: r.w, lengthIn: r.l }));
     return {
       sourceStockId: ws.stockId,

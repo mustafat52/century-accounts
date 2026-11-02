@@ -226,7 +226,13 @@ export default function CuttingPlan() {
       const quantity = parseInt(row.quantityRaw, 10);
       if (length === null || width === null) return setError('Every row needs a valid length and width.');
       if (!Number.isFinite(quantity) || quantity <= 0) return setError('Every row needs a quantity of at least 1.');
-      items.push({ lengthIn: length, widthIn: width, quantity, customerName: row.customerName.trim() || undefined });
+      items.push({
+        lengthIn: length,
+        widthIn: width,
+        quantity,
+        customerName: row.customerName.trim() || undefined,
+        noRotate: row.noRotate === true,
+      });
     }
     if (items.length === 0) return setError('Add at least one piece to cut.');
 
@@ -327,7 +333,7 @@ export default function CuttingPlan() {
                 key={row.key}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'minmax(110px, 1.3fr) minmax(90px, 1fr) minmax(90px, 1fr) minmax(70px, 0.7fr) auto',
+                  gridTemplateColumns: 'minmax(110px, 1.3fr) minmax(90px, 1fr) minmax(90px, 1fr) minmax(70px, 0.7fr) auto auto',
                   gap: 12,
                   alignItems: 'end',
                   marginBottom: 12,
@@ -371,6 +377,22 @@ export default function CuttingPlan() {
                     value={row.quantityRaw}
                     onChange={(e) => updateRow(row.key, { quantityRaw: e.target.value })}
                   />
+                </div>
+                <div className="form-field">
+                  <label>{idx === 0 ? 'Fluted / no rotate' : ' '}</label>
+                  <label
+                    className="check-label"
+                    style={{ height: 38, color: 'var(--text-muted)' }}
+                    title="Tick for fluted or patterned glass: the length is kept along the sheet's length and the piece is never turned 90°."
+                  >
+                    <input
+                      type="checkbox"
+                      style={{ padding: 0, border: 'none', background: 'none' }}
+                      checked={row.noRotate === true}
+                      onChange={(e) => updateRow(row.key, { noRotate: e.target.checked })}
+                    />
+                    Keep direction
+                  </label>
                 </div>
                 <button type="button" className="btn btn-ghost btn-small" onClick={() => removeRow(row.key)}>
                   Remove

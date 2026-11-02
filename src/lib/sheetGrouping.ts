@@ -6,6 +6,8 @@ export interface DraftRow {
   lengthRaw: string;
   widthRaw: string;
   quantityRaw: string;
+  /** Optional so drafts saved before this field existed still load. True = keep length along the sheet's length (fluted/patterned glass). */
+  noRotate?: boolean;
 }
 
 export function newDraftRow(): DraftRow {
@@ -15,6 +17,7 @@ export function newDraftRow(): DraftRow {
     lengthRaw: '',
     widthRaw: '',
     quantityRaw: '1',
+    noRotate: false,
   };
 }
 

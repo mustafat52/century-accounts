@@ -6,6 +6,7 @@ import { generateCuttingPlan, type Piece, type AvailableStock, type PlanResult }
 import { guardMobile } from '../lib/mobileGuard';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useApp } from './AppContext';
+import { INVENTORY } from '../config/business';
 
 export interface CuttingJobItemInput {
   lengthIn: number;
@@ -13,6 +14,8 @@ export interface CuttingJobItemInput {
   quantity: number;
   /** Optional — whose piece this is, shown on the cutting diagram and persisted with the job. */
   customerName?: string;
+  /** True for patterned/fluted glass: the piece keeps its length along the sheet's length (never rotated). Planning-only — not stored with the job. */
+  noRotate?: boolean;
 }
 
 interface InventoryContextValue {
@@ -169,7 +172,12 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
     const pieces: Piece[] = [];
     items.forEach((item, rowIndex) => {
       for (let i = 0; i < item.quantity; i++) {
-        pieces.push({ id: `${rowIndex}:${i}`, lengthIn: item.lengthIn, widthIn: item.widthIn });
+        pieces.push({
+          id: `${rowIndex}:${i}`,
+          lengthIn: item.lengthIn,
+          widthIn: item.widthIn,
+          canRotate: !item.noRotate,
+        });
       }
     });
 
@@ -194,7 +202,7 @@ export function InventoryProvider({ children }: { children: React.ReactNode }) {
       .filter((w) => w.categoryId === categoryId)
       .map((w) => ({ stockId: w.id, lengthIn: w.lengthIn, widthIn: w.widthIn, origin: 'waste', quantity: 1 }));
 
-    return generateCuttingPlan(pieces, [...stockPool, ...wastePool]);
+    return generateCuttingPlan(pieces, [...stockPool, ...wastePool], { minOffcutIn: INVENTORY.minOffcutIn });
   };
 
   // Commits a previously-generated plan: creates the job + job items,
