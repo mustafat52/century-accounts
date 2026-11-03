@@ -845,6 +845,16 @@ tbody tr:hover { background: var(--surface-2); }
   .table-cards .card-hide { display: none; }
 }
 
+/* Activity Log (phone): the filters sit in a compact two-column grid. */
+.log-filter-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+.log-filter-grid .form-field { min-width: 0; }
+.log-filter-grid input, .log-filter-grid select { width: 100%; min-width: 0; }
+
 /* ---------- Welcome overlay (post-login) ---------- */
 
 .welcome-overlay {

@@ -4,6 +4,7 @@ import Topbar from '../components/Topbar';
 import { useApp } from '../context/AppContext';
 import { supabase } from '../lib/supabaseClient';
 import { addDaysLocal } from '../utils/format';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { AREAS, mapActivity, describeTitle, describeDetails, tableLabel, collapseEditPairs, type ActivityEntry, type ActivityLookups } from '../lib/activityLog';
 
 const PAGE_SIZE = 50;
@@ -32,6 +33,8 @@ export default function ActivityLog() {
   const [toDate, setToDate] = useState('');
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const isMobile = useIsMobile();
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const lookups = useMemo<ActivityLookups>(
     () => ({
@@ -100,58 +103,124 @@ export default function ActivityLog() {
       return next;
     });
 
-  const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  // Phones get a shorter stamp (no seconds) so it fits on one line of a card.
+  const when = (iso: string) =>
+    new Date(iso).toLocaleString(
+      'en-IN',
+      isMobile
+        ? { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }
+        : { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }
+    );
+
+  const activeFilters = [area !== 'all', actor !== 'all', action !== 'all', !!fromDate, !!toDate].filter(Boolean).length;
+  const clearFilters = () => {
+    setArea('all');
+    setActor('all');
+    setAction('all');
+    setFromDate('');
+    setToDate('');
+  };
+
+  const areaField = (
+    <div className="form-field">
+      <label>Area</label>
+      <select value={area} onChange={(e) => setArea(e.target.value)}>
+        {AREAS.map((a) => (
+          <option key={a.key} value={a.key}>
+            {a.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+  const whoField = (
+    <div className="form-field">
+      <label>Who</label>
+      <select value={actor} onChange={(e) => setActor(e.target.value)}>
+        <option value="all">Everyone</option>
+        {actorOptions.map(([id, name]) => (
+          <option key={id} value={id}>
+            {name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+  const typeField = (
+    <div className="form-field">
+      <label>Type</label>
+      <select value={action} onChange={(e) => setAction(e.target.value as typeof action)}>
+        <option value="all">All</option>
+        <option value="insert">Added</option>
+        <option value="update">Changed</option>
+        <option value="delete">Deleted</option>
+      </select>
+    </div>
+  );
+  const fromField = (
+    <div className="form-field">
+      <label>From</label>
+      <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+    </div>
+  );
+  const toField = (
+    <div className="form-field">
+      <label>To</label>
+      <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+    </div>
+  );
+  const searchField = (
+    <div className="form-field">
+      <label>{isMobile ? 'Search' : 'Search (loaded entries)'}</label>
+      <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="e.g. QUO-223, Ravi, payment" />
+    </div>
+  );
 
   return (
     <>
       <Topbar title="Activity Log" subtitle="Every change made in the app: who did it, when, and exactly what changed" />
       <div className="view-body">
-        <div className="form-row" style={{ marginBottom: 12 }}>
-          <div className="form-field">
-            <label>Area</label>
-            <select value={area} onChange={(e) => setArea(e.target.value)}>
-              {AREAS.map((a) => (
-                <option key={a.key} value={a.key}>
-                  {a.label}
-                </option>
-              ))}
-            </select>
+        {isMobile ? (
+          // Phone: search stays visible, the five filters tuck behind one
+          // button (with a count of how many are active) instead of
+          // pushing the entries a whole screen down.
+          <div style={{ marginBottom: 14 }}>
+            {searchField}
+            <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
+              <button className="btn btn-ghost btn-small" onClick={() => setFiltersOpen((o) => !o)}>
+                {filtersOpen ? 'Hide filters' : activeFilters > 0 ? `Filters (${activeFilters})` : 'Filters'}
+              </button>
+              {activeFilters > 0 && (
+                <button className="btn btn-ghost btn-small" onClick={clearFilters}>
+                  Clear filters
+                </button>
+              )}
+            </div>
+            {filtersOpen && (
+              <div className="log-filter-grid">
+                {areaField}
+                {whoField}
+                {typeField}
+                <div />
+                {fromField}
+                {toField}
+              </div>
+            )}
           </div>
-          <div className="form-field">
-            <label>Who</label>
-            <select value={actor} onChange={(e) => setActor(e.target.value)}>
-              <option value="all">Everyone</option>
-              {actorOptions.map(([id, name]) => (
-                <option key={id} value={id}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="form-field">
-            <label>Type</label>
-            <select value={action} onChange={(e) => setAction(e.target.value as typeof action)}>
-              <option value="all">All</option>
-              <option value="insert">Added</option>
-              <option value="update">Changed</option>
-              <option value="delete">Deleted</option>
-            </select>
-          </div>
-        </div>
-        <div className="form-row" style={{ marginBottom: 16 }}>
-          <div className="form-field">
-            <label>From</label>
-            <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
-          </div>
-          <div className="form-field">
-            <label>To</label>
-            <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
-          </div>
-          <div className="form-field">
-            <label>Search (loaded entries)</label>
-            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="e.g. QUO-223, Ravi, payment" />
-          </div>
-        </div>
+        ) : (
+          <>
+            <div className="form-row" style={{ marginBottom: 12 }}>
+              {areaField}
+              {whoField}
+              {typeField}
+            </div>
+            <div className="form-row" style={{ marginBottom: 16 }}>
+              {fromField}
+              {toField}
+              {searchField}
+            </div>
+          </>
+        )}
 
         {error && <p style={{ margin: '0 0 14px', color: 'var(--danger)', fontSize: 13 }}>{error}</p>}
 
@@ -166,7 +235,7 @@ export default function ActivityLog() {
             </button>
           </div>
           <div className="table-scroll">
-            <table>
+            <table className="table-cards">
               <thead>
                 <tr>
                   <th style={{ whiteSpace: 'nowrap' }}>When</th>
@@ -180,12 +249,15 @@ export default function ActivityLog() {
                   const shown = open ? lines : lines.slice(0, COLLAPSED_LINES);
                   const style = ACTION_STYLE[e.action];
                   return (
-                    <tr key={e.id}>
-                      <td className="row-sub" style={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}>
+                    <tr key={e.id} style={isMobile ? { borderLeft: `3px solid ${style.color}` } : undefined}>
+                      <td className="row-sub card-meta" style={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}>
                         {when(e.createdAt)}
                       </td>
-                      <td style={{ verticalAlign: 'top' }}>{e.actorName}</td>
-                      <td style={{ verticalAlign: 'top' }}>
+                      <td className="card-meta" style={{ verticalAlign: 'top' }}>
+                        <span className="mobile-label">By</span>
+                        {e.actorName}
+                      </td>
+                      <td className="card-main" style={{ verticalAlign: 'top', overflowWrap: 'anywhere' }}>
                         <div>
                           <span style={{ color: style.color, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', marginRight: 8 }}>{style.label}</span>
                           <strong>{title}</strong>
