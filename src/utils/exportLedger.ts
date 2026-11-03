@@ -152,17 +152,12 @@ export function exportAllCustomersLedger(
 
 // ============================================================
 // Worker advances ledger — every advance a worker has taken, oldest first,
-// with this month's salary-to-pay (salary minus advances). Salary payments
-// themselves are not tracked.
+// with this month's total. Salary payments are not tracked.
 // ============================================================
 
 type WorkerLedgerRow = [string, number, string];
 
 const WORKER_HEADER_ROW: (string | number)[] = ['Date', 'Advance', 'Note'];
-
-function salaryToPay(worker: Worker): number {
-  return Math.max(0, worker.monthlySalary - worker.advancesThisMonth);
-}
 
 function workerSheet(worker: Worker, advances: WorkerAdvance[]) {
   const own = advances.filter((a) => a.workerId === worker.id).sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -174,7 +169,6 @@ function workerSheet(worker: Worker, advances: WorkerAdvance[]) {
     ['Monthly Salary', formatINR(worker.monthlySalary)],
     [],
     ['This Month — Advances taken', formatINR(worker.advancesThisMonth)],
-    ['This Month — Salary to pay (after advances)', formatINR(salaryToPay(worker))],
     [],
     WORKER_HEADER_ROW,
     ...rows,
@@ -198,7 +192,6 @@ export function exportAllWorkersLedger(workers: Worker[], advances: WorkerAdvanc
     Worker: w.name,
     'Monthly Salary': w.monthlySalary,
     'Advances This Month': w.advancesThisMonth,
-    'Salary To Pay (after advances)': salaryToPay(w),
   }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(overview), 'All Workers');
 

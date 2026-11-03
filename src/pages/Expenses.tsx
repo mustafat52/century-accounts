@@ -17,23 +17,14 @@ type Tab = 'expenses' | 'advances';
 const CATEGORY_LABEL: Record<string, string> = { 'Payslips & Wages': 'Staff advance' };
 const categoryLabel = (c: string) => CATEGORY_LABEL[c] ?? c;
 
-// What the worker is still to be paid this month: salary minus the advances
-// already taken. Salary payments are NOT tracked, so this is the only
-// "remaining" figure — it never goes below zero.
-function salaryToPay(w: Worker): number {
-  return Math.max(0, w.monthlySalary - w.advancesThisMonth);
-}
-function advancesOverSalary(w: Worker): number {
-  return Math.max(0, w.advancesThisMonth - w.monthlySalary);
-}
-
 function monthLabel(): string {
   return new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 }
 
-// One worker: their salary, what they've taken in advance this month, what's
-// left to pay, a single "Give advance" form, and the advance history (each
-// with a Delete). Nothing here records salary payments.
+// One worker: their salary, what they've taken in advance this month, a
+// single "Give advance" form, and the advance history (each with a Delete).
+// The owner works out the salary to pay by hand — nothing here calculates or
+// records salary payments.
 function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose: () => void }) {
   const { workerAdvances, logWorkerAdvance, deleteWorkerAdvance, openEditWorkerModal } = useApp();
 
@@ -53,13 +44,6 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
 
   const amountNum = parseFloat(amount) || 0;
   const thisMonth = todayLocal().slice(0, 7);
-  const toPay = salaryToPay(worker);
-  const over = advancesOverSalary(worker);
-
-  // Only meaningful when the advance is dated this month — the totals above
-  // are for the current month.
-  const countsThisMonth = date.slice(0, 7) === thisMonth;
-  const afterThis = Math.max(0, worker.monthlySalary - (worker.advancesThisMonth + amountNum));
 
   const handleSave = async () => {
     if (amountNum <= 0 || !date || saving) return;
@@ -94,15 +78,9 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
           <div className="stat-grid">
             <StatCard label="Monthly salary" value={formatINR(worker.monthlySalary)} />
             <StatCard label={`Advances taken — ${monthLabel()}`} value={formatINR(worker.advancesThisMonth)} />
-            <StatCard
-              label="Salary to pay (after advances)"
-              value={formatINR(toPay)}
-              delta={over > 0 ? `Advances are ${formatINR(over)} more than salary` : `${formatINR(worker.monthlySalary)} − ${formatINR(worker.advancesThisMonth)}`}
-              deltaDirection={over > 0 ? 'down' : 'up'}
-            />
           </div>
 
-          <div className="desktop-only">
+          <div>
             <div className="section-title">Give an advance</div>
             <div className="form-row">
               <div className="form-field">
@@ -118,16 +96,6 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
                 <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Medical, festival" />
               </div>
             </div>
-            {amountNum > 0 && countsThisMonth && (
-              <div className="row-sub" style={{ marginBottom: 8 }}>
-                After this advance, salary to pay will be <strong>{formatINR(afterThis)}</strong>.
-              </div>
-            )}
-            {amountNum > 0 && !countsThisMonth && (
-              <div className="row-sub" style={{ marginBottom: 8 }}>
-                This date is not in {monthLabel()}, so it won't change this month's salary-to-pay.
-              </div>
-            )}
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 20 }}>
               <button className="btn btn-primary btn-small" onClick={handleSave} disabled={amountNum <= 0 || !date || saving}>
                 {saving ? 'Saving…' : 'Save advance'}
@@ -168,7 +136,7 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
                     <td className="row-sub">{a.note || '—'}</td>
                     <td style={{ textAlign: 'right' }}>
                       <button
-                        className="btn btn-ghost btn-small desktop-only"
+                        className="btn btn-ghost btn-small"
                         style={{ color: 'var(--danger)' }}
                         onClick={() => setDeleteId(a.id)}
                       >
@@ -187,7 +155,7 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
             Close
           </button>
           <button
-            className="btn btn-ghost desktop-only"
+            className="btn btn-ghost"
             onClick={() => {
               onClose();
               openEditWorkerModal(worker.id);
@@ -208,7 +176,7 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
         title="Delete this advance?"
         message={
           deleteTarget
-            ? `${formatINR(deleteTarget.amount)} given to ${worker.name} on ${deleteTarget.date} will be removed, together with its entry in Expenses. ${worker.name}'s salary-to-pay will go back up. This can't be undone.`
+            ? `${formatINR(deleteTarget.amount)} given to ${worker.name} on ${deleteTarget.date} will be removed, together with its entry in Expenses. This can't be undone.`
             : ''
         }
         confirmLabel={deleting ? 'Deleting…' : 'Delete advance'}
@@ -287,7 +255,6 @@ export default function Expenses() {
 
   const totalGeneral = expenses.reduce((sum, e) => sum + e.amount, 0);
   const totalAdvances = workers.reduce((sum, w) => sum + w.advancesThisMonth, 0);
-  const totalToPay = workers.reduce((sum, w) => sum + salaryToPay(w), 0);
 
   // Which expense rows are really a worker's advance (so the delete warning
   // can say so).
@@ -345,7 +312,6 @@ export default function Expenses() {
         <div className="stat-grid">
           <StatCard label="Expenses so far" value={formatINR(totalGeneral)} delta={`${expenses.length} open entr${expenses.length === 1 ? 'y' : 'ies'}`} />
           <StatCard label={`Staff advances — ${monthLabel()}`} value={formatINR(totalAdvances)} />
-          <StatCard label="Salaries still to pay (after advances)" value={formatINR(totalToPay)} />
         </div>
 
         <div className="chip-row">
@@ -370,13 +336,13 @@ export default function Expenses() {
                     Export Full Report (Excel)
                   </button>
                   <button
-                    className="btn btn-ghost btn-small desktop-only"
+                    className="btn btn-ghost btn-small"
                     onClick={() => setConfirmCloseOpen(true)}
                     disabled={expenses.length === 0}
                   >
                     Close Month
                   </button>
-                  <button className="btn btn-primary btn-small desktop-only" onClick={openExpenseModal}>
+                  <button className="btn btn-primary btn-small" onClick={openExpenseModal}>
                     + New Expense
                   </button>
                 </div>
@@ -413,7 +379,7 @@ export default function Expenses() {
                         <td className="num card-amount">{formatINR(e.amount)}</td>
                         <td className="card-actions" style={{ textAlign: 'right' }}>
                           <button
-                            className="btn btn-ghost btn-small desktop-only"
+                            className="btn btn-ghost btn-small"
                             style={{ color: 'var(--danger)' }}
                             onClick={() => setDeleteTarget(e)}
                           >
@@ -507,14 +473,14 @@ export default function Expenses() {
                 <button className="btn btn-ghost btn-small" onClick={() => exportAllWorkersLedger(workers, workerAdvances)}>
                   Export All (Excel)
                 </button>
-                <button className="btn btn-primary btn-small desktop-only" onClick={openWorkerModal}>
+                <button className="btn btn-primary btn-small" onClick={openWorkerModal}>
                   + New Worker
                 </button>
               </div>
             </div>
             <div className="row-sub" style={{ padding: '12px 20px 0' }}>
-              Note down every advance a worker takes during the month. At month end, pay them{' '}
-              <strong>salary minus advances</strong>. Click a worker to give an advance or see their history.
+              Note down every advance a worker takes during the month. Click a worker to give an advance or see their
+              history.
             </div>
             <div className="table-scroll">
               <table className="table-cards">
@@ -523,20 +489,18 @@ export default function Expenses() {
                     <th>Worker</th>
                     <th>Monthly salary</th>
                     <th>Advances taken</th>
-                    <th>Salary to pay</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {workers.length === 0 && (
                     <tr>
-                      <td className="row-sub" colSpan={5}>
+                      <td className="row-sub" colSpan={4}>
                         No workers added yet. Click “+ New Worker” to add one.
                       </td>
                     </tr>
                   )}
                   {workers.map((w) => {
-                    const over = advancesOverSalary(w);
                     return (
                       <tr key={w.id} onClick={() => setSelectedWorkerId(w.id)} style={{ cursor: 'pointer' }}>
                         <td className="row-name card-main">{w.name}</td>
@@ -544,22 +508,13 @@ export default function Expenses() {
                           <span className="mobile-label">Salary</span>
                           {formatINR(w.monthlySalary)}
                         </td>
-                        <td className="num card-meta" style={{ color: w.advancesThisMonth > 0 ? 'var(--warning)' : undefined }}>
+                        <td className="num card-amount" style={{ color: w.advancesThisMonth > 0 ? 'var(--warning)' : undefined }}>
                           <span className="mobile-label">Advances</span>
                           {formatINR(w.advancesThisMonth)}
                         </td>
-                        <td className="num card-amount">
-                          <span className="mobile-label">To pay</span>
-                          {formatINR(salaryToPay(w))}
-                          {over > 0 && (
-                            <div className="row-sub" style={{ color: 'var(--warning)' }}>
-                              Advances exceed salary by {formatINR(over)}
-                            </div>
-                          )}
-                        </td>
                         <td className="card-actions" style={{ textAlign: 'right' }}>
                           <button
-                            className="btn btn-primary btn-small desktop-only"
+                            className="btn btn-primary btn-small"
                             onClick={(ev) => {
                               ev.stopPropagation();
                               setSelectedWorkerId(w.id);
@@ -594,7 +549,7 @@ export default function Expenses() {
           deleteTarget
             ? `${formatINR(deleteTarget.amount)} — ${deleteTarget.description} (${deleteTarget.date}) will be permanently removed and will no longer count in Reports or totals.${
                 deleteAdvanceOwner
-                  ? ` This is an advance given to ${deleteAdvanceOwner}, so it will also be removed from their advances and their salary-to-pay will go back up.`
+                  ? ` This is an advance given to ${deleteAdvanceOwner}, so it will also be removed from their advances.`
                   : ''
               } This can't be undone.`
             : ''
