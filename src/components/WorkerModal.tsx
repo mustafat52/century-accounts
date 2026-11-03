@@ -6,14 +6,12 @@ export default function WorkerModal() {
   const { isWorkerModalOpen, editingWorkerId, closeWorkerModal, addWorker, updateWorker, workers } = useApp();
 
   const [name, setName] = useState('');
-  const [salary, setSalary] = useState('');
 
   const editingWorker = editingWorkerId ? workers.find((w) => w.id === editingWorkerId) : null;
 
   useEffect(() => {
     if (isWorkerModalOpen) {
       setName(editingWorker?.name ?? '');
-      setSalary(editingWorker ? String(editingWorker.monthlySalary) : '');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isWorkerModalOpen, editingWorkerId]);
@@ -21,11 +19,8 @@ export default function WorkerModal() {
   if (!isWorkerModalOpen) return null;
 
   const handleSave = async () => {
-    const salaryNum = parseFloat(salary) || 0;
-    if (!name || salaryNum <= 0) return;
-    const ok = editingWorkerId
-      ? await updateWorker(editingWorkerId, { name, monthlySalary: salaryNum })
-      : await addWorker({ name, monthlySalary: salaryNum });
+    if (!name.trim()) return;
+    const ok = editingWorkerId ? await updateWorker(editingWorkerId, { name: name.trim() }) : await addWorker({ name: name.trim() });
     if (ok) closeWorkerModal();
   };
 
@@ -44,12 +39,6 @@ export default function WorkerModal() {
             <div className="form-field">
               <label>Worker name</label>
               <input type="text" value={name} onChange={(e) => setName(capitalizeFirst(e.target.value))} placeholder="e.g. Ramesh" />
-            </div>
-          </div>
-          <div className="form-row">
-            <div className="form-field">
-              <label>Monthly salary (₹)</label>
-              <input type="number" value={salary} onChange={(e) => setSalary(e.target.value)} placeholder="0.00" />
             </div>
           </div>
         </div>

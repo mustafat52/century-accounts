@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Topbar from '../components/Topbar';
 import StatCard from '../components/StatCard';
@@ -21,10 +21,16 @@ function monthLabel(): string {
   return new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 }
 
-// One worker: their salary, what they've taken in advance this month, a
-// single "Give advance" form, and the advance history (each with a Delete).
-// The owner works out the salary to pay by hand — nothing here calculates or
-// records salary payments.
+// 'YYYY-MM' -> 'November 2026'
+function monthKeyLabel(key: string): string {
+  return new Date(`${key}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+}
+
+// One worker: what they've taken in advance this month and in total, a
+// single "Give advance" form, and the advance history grouped month by month
+// (each advance with a Delete). Salaries are NOT kept in the system — the
+// owner works those out by hand — so nothing here shows, calculates or
+// records salary.
 function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose: () => void }) {
   const { workerAdvances, logWorkerAdvance, deleteWorkerAdvance, openEditWorkerModal } = useApp();
 
@@ -41,6 +47,20 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
     .filter((a) => a.workerId === worker.id)
     .sort((a, b) => (a.date < b.date ? 1 : -1));
   const deleteTarget = advances.find((a) => a.id === deleteId) ?? null;
+
+  // History grouped by month (newest month first), each with its total.
+  const groups: { key: string; total: number; items: typeof advances }[] = [];
+  advances.forEach((a) => {
+    const key = a.date.slice(0, 7);
+    let g = groups.find((x) => x.key === key);
+    if (!g) {
+      g = { key, total: 0, items: [] };
+      groups.push(g);
+    }
+    g.items.push(a);
+    g.total += a.amount;
+  });
+  const allTimeTotal = advances.reduce((sum, a) => sum + a.amount, 0);
 
   const amountNum = parseFloat(amount) || 0;
   const thisMonth = todayLocal().slice(0, 7);
@@ -76,8 +96,8 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
 
         <div className="modal-body">
           <div className="stat-grid">
-            <StatCard label="Monthly salary" value={formatINR(worker.monthlySalary)} />
             <StatCard label={`Advances taken — ${monthLabel()}`} value={formatINR(worker.advancesThisMonth)} />
+            <StatCard label="All advances taken (total)" value={formatINR(allTimeTotal)} />
           </div>
 
           <div>
@@ -122,28 +142,38 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
                     </td>
                   </tr>
                 )}
-                {advances.map((a) => (
-                  <tr key={a.id}>
-                    <td className="row-sub">
-                      {a.date}
-                      {a.date.slice(0, 7) === thisMonth && (
-                        <span className="badge due" style={{ marginLeft: 8 }}>
-                          This month
+                {groups.map((g) => (
+                  <Fragment key={g.key}>
+                    <tr>
+                      <td colSpan={4} style={{ fontWeight: 600, paddingTop: 16 }}>
+                        {monthKeyLabel(g.key)}
+                        {g.key === thisMonth && (
+                          <span className="badge due" style={{ marginLeft: 8 }}>
+                            This month
+                          </span>
+                        )}
+                        <span className="row-sub" style={{ marginLeft: 10, fontWeight: 400 }}>
+                          {g.items.length} advance{g.items.length !== 1 ? 's' : ''} · {formatINR(g.total)}
                         </span>
-                      )}
-                    </td>
-                    <td className="num">{formatINR(a.amount)}</td>
-                    <td className="row-sub">{a.note || '—'}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button
-                        className="btn btn-ghost btn-small"
-                        style={{ color: 'var(--danger)' }}
-                        onClick={() => setDeleteId(a.id)}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
+                      </td>
+                    </tr>
+                    {g.items.map((a) => (
+                      <tr key={a.id}>
+                        <td className="row-sub">{a.date}</td>
+                        <td className="num">{formatINR(a.amount)}</td>
+                        <td className="row-sub">{a.note || '—'}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          <button
+                            className="btn btn-ghost btn-small"
+                            style={{ color: 'var(--danger)' }}
+                            onClick={() => setDeleteId(a.id)}
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -161,7 +191,7 @@ function WorkerDetailModal({ worker, onClose }: { worker: Worker | null; onClose
               openEditWorkerModal(worker.id);
             }}
           >
-            Edit Salary
+            Edit Name
           </button>
           <button className="btn btn-primary" onClick={() => exportWorkerLedger(worker, workerAdvances)}>
             Export (Excel)
@@ -487,15 +517,14 @@ export default function Expenses() {
                 <thead>
                   <tr>
                     <th>Worker</th>
-                    <th>Monthly salary</th>
-                    <th>Advances taken</th>
+                    <th>Advances taken — {monthLabel()}</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {workers.length === 0 && (
                     <tr>
-                      <td className="row-sub" colSpan={4}>
+                      <td className="row-sub" colSpan={3}>
                         No workers added yet. Click “+ New Worker” to add one.
                       </td>
                     </tr>
@@ -504,10 +533,6 @@ export default function Expenses() {
                     return (
                       <tr key={w.id} onClick={() => setSelectedWorkerId(w.id)} style={{ cursor: 'pointer' }}>
                         <td className="row-name card-main">{w.name}</td>
-                        <td className="num card-meta">
-                          <span className="mobile-label">Salary</span>
-                          {formatINR(w.monthlySalary)}
-                        </td>
                         <td className="num card-amount" style={{ color: w.advancesThisMonth > 0 ? 'var(--warning)' : undefined }}>
                           <span className="mobile-label">Advances</span>
                           {formatINR(w.advancesThisMonth)}

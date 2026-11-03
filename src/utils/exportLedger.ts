@@ -164,16 +164,21 @@ function workerSheet(worker: Worker, advances: WorkerAdvance[]) {
   const rows: WorkerLedgerRow[] = own.map((a) => [a.date, a.amount, a.note ?? '']);
   const totalAdvances = own.reduce((sum, a) => sum + a.amount, 0);
 
+  // Month-by-month totals (oldest first) so the owner can read each month at a glance.
+  const monthTotals = new Map<string, number>();
+  own.forEach((a) => monthTotals.set(a.date.slice(0, 7), (monthTotals.get(a.date.slice(0, 7)) ?? 0) + a.amount));
+
   const aoa: (WorkerLedgerRow | (string | number)[])[] = [
     ['Worker', worker.name],
-    ['Monthly Salary', formatINR(worker.monthlySalary)],
-    [],
     ['This Month — Advances taken', formatINR(worker.advancesThisMonth)],
     [],
     WORKER_HEADER_ROW,
     ...rows,
     [],
     ['Total advances (all time)', totalAdvances, ''],
+    [],
+    ['Month-wise totals'],
+    ...Array.from(monthTotals.entries()).map(([month, total]) => [month, total]),
   ];
 
   return XLSX.utils.aoa_to_sheet(aoa);
@@ -190,8 +195,8 @@ export function exportAllWorkersLedger(workers: Worker[], advances: WorkerAdvanc
 
   const overview = workers.map((w) => ({
     Worker: w.name,
-    'Monthly Salary': w.monthlySalary,
     'Advances This Month': w.advancesThisMonth,
+    'Total Advances (all time)': advances.filter((a) => a.workerId === w.id).reduce((sum, a) => sum + a.amount, 0),
   }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(overview), 'All Workers');
 

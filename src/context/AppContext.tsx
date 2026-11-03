@@ -160,9 +160,10 @@ interface EditQuotationInput {
   items: NewQuotationItemInput[];
 }
 
+// Salaries are deliberately not kept in the system (the owner works them
+// out by hand), so a worker is just a name.
 interface NewWorkerInput {
   name: string;
-  monthlySalary: number;
 }
 
 interface NewWorkerAdvanceInput {
@@ -1536,7 +1537,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const addWorker = async (input: NewWorkerInput): Promise<boolean> => {
     const { data, error } = await supabase
       .from('workers')
-      .insert({ name: input.name, monthly_salary: input.monthlySalary })
+      // monthly_salary is NOT NULL in the database, so it's stored as 0 and never shown.
+      .insert({ name: input.name, monthly_salary: 0 })
       .select()
       .single();
     if (error || !data) {
@@ -1549,7 +1551,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       monthlySalary: Number(data.monthly_salary),
       advancesThisMonth: 0,
       paidThisMonth: 0,
-      remainingThisMonth: Number(data.monthly_salary),
+      remainingThisMonth: 0,
     };
     setWorkers((prev) => [...prev, newWorker].sort((a, b) => a.name.localeCompare(b.name)));
     return true;
@@ -1558,7 +1560,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const updateWorker = async (workerId: string, input: NewWorkerInput): Promise<boolean> => {
     const { error } = await supabase
       .from('workers')
-      .update({ name: input.name, monthly_salary: input.monthlySalary })
+      .update({ name: input.name })
       .eq('id', workerId);
     if (error) {
       reportError('Updating worker', error);
