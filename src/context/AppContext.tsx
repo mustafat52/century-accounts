@@ -217,6 +217,9 @@ interface AppContextValue {
   vendors: Vendor[];
   addVendor: (input: NewVendorInput) => Promise<Vendor | null>;
   updateVendor: (id: string, input: NewVendorInput) => Promise<boolean>;
+  // Permanently deletes a vendor AND everything recorded against them
+  // (purchases, payments, slips). The caller is expected to have warned.
+  deleteVendor: (id: string) => Promise<boolean>;
 
   expenses: Expense[];
   addExpense: (input: NewExpenseInput) => Promise<boolean>;
@@ -225,6 +228,10 @@ interface AppContextValue {
   // timestamp on success so the caller can tie it to the report it just
   // downloaded, or null on failure.
   archiveExpenses: (expenseIds: string[]) => Promise<string | null>;
+  // Permanently deletes a general expense (never a vendor purchase). If the
+  // expense is the entry created by a staff advance, the advance is removed
+  // too, so the worker's totals stay correct.
+  deleteExpense: (expenseId: string) => Promise<boolean>;
 
   vendorPurchases: VendorPurchase[];
   vendorPayments: VendorPayment[];
@@ -269,6 +276,8 @@ interface AppContextValue {
   updateWorker: (workerId: string, input: NewWorkerInput) => Promise<boolean>;
   workerAdvances: WorkerAdvance[];
   logWorkerAdvance: (input: NewWorkerAdvanceInput) => Promise<boolean>;
+  // Removes an advance AND the expense entry it created.
+  deleteWorkerAdvance: (advanceId: string) => Promise<boolean>;
   workerPayments: WorkerPayment[];
   recordWorkerPayment: (workerId: string, amount: number, date: string, forMonth: string, note?: string) => Promise<boolean>;
 
@@ -911,7 +920,76 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return archivedAt;
   };
 
+  // Hard delete of one general expense. The activity log trigger on the
+  // expenses table keeps a record of what was removed. Vendor purchases
+  // are excluded here on purpose (they have payment history behind them).
+  const deleteExpense = async (expenseId: string): Promise<boolean> => {
+    // An expense created by a staff advance must go through the advance, or
+    // the worker's "advances this month" would no longer match the list.
+    const linkedAdvance = workerAdvances.find((a) => a.linkedExpenseId === expenseId);
+    if (linkedAdvance) return deleteWorkerAdvance(linkedAdvance.id);
+
+    const { data, error } = await supabase
+      .from('expenses')
+      .delete()
+      .eq('id', expenseId)
+      .is('vendor_id', null)
+      .select('id');
+    if (error) {
+      reportError('Deleting expense', error);
+      return false;
+    }
+    if (!data || data.length === 0) {
+      showToast('That expense could not be deleted — it may already be gone.', 'error');
+      await refreshExpenses();
+      return false;
+    }
+    setExpenses((prev) => prev.filter((e) => e.id !== expenseId));
+    return true;
+  };
+
   // ---------- Vendor purchases ----------
+  // Deletes a vendor together with their purchases, payments and slips.
+  // Order matters: slips (vendor_id is ON DELETE RESTRICT) -> payments ->
+  // purchase expenses (vendor_id would otherwise be set NULL and the
+  // purchases would leak into the general Expenses list) -> the vendor.
+  // The steps aren't one transaction, so on any failure everything is
+  // refreshed to show what really remains — the delete can simply be run
+  // again to finish.
+  const deleteVendor = async (vendorId: string): Promise<boolean> => {
+    const refreshAfter = () =>
+      Promise.all([refreshVendors(), refreshVendorPurchases(), refreshVendorPayments(), refreshVendorSlips(), refreshExpenses()]);
+    const fail = async (context: string, error: { message?: string } | null) => {
+      reportError(context, error);
+      await refreshAfter();
+      return false;
+    };
+
+    const slips = await supabase.from('vendor_slips').delete().eq('vendor_id', vendorId);
+    if (slips.error) return fail('Deleting the vendor’s slips', slips.error);
+
+    const owned = await supabase.from('expenses').select('id').eq('vendor_id', vendorId);
+    if (owned.error) return fail('Looking up the vendor’s purchases', owned.error);
+    const expenseIds = (owned.data ?? []).map((r) => r.id as string);
+    if (expenseIds.length > 0) {
+      const pays = await supabase.from('vendor_payments').delete().in('expense_id', expenseIds);
+      if (pays.error) return fail('Deleting the vendor’s payments', pays.error);
+      const exps = await supabase.from('expenses').delete().eq('vendor_id', vendorId);
+      if (exps.error) return fail('Deleting the vendor’s purchases', exps.error);
+    }
+
+    const { data, error } = await supabase.from('vendors').delete().eq('id', vendorId).select('id');
+    if (error) return fail('Deleting vendor', error);
+    if (!data || data.length === 0) {
+      showToast('That vendor could not be deleted — it may already be gone.', 'error');
+      await refreshAfter();
+      return false;
+    }
+    setVendors((prev) => prev.filter((v) => v.id !== vendorId));
+    await refreshAfter();
+    return true;
+  };
+
   const addVendorPurchase = async (input: NewVendorPurchaseInput): Promise<boolean> => {
     const { data, error } = await supabase
       .from('expenses')
@@ -1505,6 +1583,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return true;
   };
 
+  // Deletes the advance first, then the expense entry it created. If the
+  // second step fails the advance is already gone and the expense simply
+  // shows up as an ordinary expense that can be deleted on its own — never
+  // the other way round (an advance with no expense behind it).
+  const deleteWorkerAdvance = async (advanceId: string): Promise<boolean> => {
+    const advance = workerAdvances.find((a) => a.id === advanceId);
+    if (!advance) return false;
+
+    const { data, error } = await supabase.from('worker_advances').delete().eq('id', advanceId).select('id');
+    if (error) {
+      reportError('Deleting advance', error);
+      return false;
+    }
+    if (!data || data.length === 0) {
+      showToast('That advance could not be deleted — it may already be gone.', 'error');
+      await Promise.all([refreshWorkers(), refreshWorkerAdvances()]);
+      return false;
+    }
+
+    let ok = true;
+    if (advance.linkedExpenseId) {
+      const { error: expErr } = await supabase
+        .from('expenses')
+        .delete()
+        .eq('id', advance.linkedExpenseId)
+        .is('vendor_id', null);
+      if (expErr) {
+        reportError('Removing the advance from expenses', expErr);
+        ok = false;
+      }
+    }
+    await Promise.all([refreshWorkers(), refreshExpenses(), refreshWorkerAdvances()]);
+    return ok;
+  };
+
   // Records a salary SETTLEMENT payment — distinct from an advance. Always
   // creates a matching expense row (same pattern as advances), so total
   // payroll spend shows up correctly in Expenses/Reports.
@@ -1593,7 +1706,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AppContextValue>(
     () => ({
       gstEnabled,
-      // Every mutating action below is wrapped with guardMobile — a
+      // EXCEPTION — these work on mobile too, by request: Expenses (add /
+      // delete / close month), staff advances & workers, Employee Control
+      // and Important Links. They are deliberately NOT wrapped with
+      // guardMobile below, and their pages no longer use `desktop-only`.
+      // To make any of them view-only on mobile again, wrap it with
+      // guardMobile(fn, isMobileView) like the rest.
+      addExpense,
+      archiveExpenses,
+      deleteExpense,
+      addWorker,
+      updateWorker,
+      logWorkerAdvance,
+      deleteWorkerAdvance,
+      addLink,
+      setEmployeeActive,
+      createEmployee,
+      deleteEmployee,
+      // Every other mutating action below is wrapped with guardMobile — a
       // second layer behind the UI's `desktop-only` classes (see
       // src/lib/mobileGuard.ts). Read-only values, fetches, and modal
       // open/close toggles are passed through unwrapped.
@@ -1607,9 +1737,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       vendors,
       addVendor: guardMobile(addVendor, isMobileView),
       updateVendor: guardMobile(updateVendor, isMobileView),
+      deleteVendor: guardMobile(deleteVendor, isMobileView),
       expenses,
-      addExpense: guardMobile(addExpense, isMobileView),
-      archiveExpenses: guardMobile(archiveExpenses, isMobileView),
       vendorPurchases,
       vendorPayments,
       addVendorPurchase: guardMobile(addVendorPurchase, isMobileView),
@@ -1633,14 +1762,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       quotationPayments,
       recordQuotationPayment: guardMobile(recordQuotationPayment, isMobileView),
       workers,
-      addWorker: guardMobile(addWorker, isMobileView),
-      updateWorker: guardMobile(updateWorker, isMobileView),
       workerAdvances,
-      logWorkerAdvance: guardMobile(logWorkerAdvance, isMobileView),
       workerPayments,
       recordWorkerPayment: guardMobile(recordWorkerPayment, isMobileView),
       links,
-      addLink: guardMobile(addLink, isMobileView),
       priceList,
       addPriceListItem: guardMobile(addPriceListItem, isMobileView),
       updatePriceListItem: guardMobile(updatePriceListItem, isMobileView),
@@ -1735,9 +1860,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       clearAccessDeniedMessage: () => setAccessDeniedMessage(null),
       employees,
       refreshEmployees,
-      setEmployeeActive: guardMobile(setEmployeeActive, isMobileView),
-      createEmployee: guardMobile(createEmployee, isMobileView),
-      deleteEmployee: guardMobile(deleteEmployee, isMobileView),
       isMobileView,
     }),
     [

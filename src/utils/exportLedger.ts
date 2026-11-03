@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import type { Customer, Invoice, Quotation, QuotationPayment, Worker, WorkerAdvance, WorkerPayment, Expense, VendorPurchase, Vendor } from '../types';
+import type { Customer, Invoice, Quotation, QuotationPayment, Worker, WorkerAdvance, Expense, VendorPurchase, Vendor } from '../types';
 import { PAYMENT_METHOD_LABELS } from '../types';
 import { formatINR } from './format';
 
@@ -151,88 +151,64 @@ export function exportAllCustomersLedger(
 }
 
 // ============================================================
-// Worker / Payslips ledger — same one-sheet narrative style as the
-// customer ledger: every advance and every salary settlement payment,
-// in one combined chronological table, oldest first.
+// Worker advances ledger — every advance a worker has taken, oldest first,
+// with this month's salary-to-pay (salary minus advances). Salary payments
+// themselves are not tracked.
 // ============================================================
 
-type WorkerLedgerRow = [string, string, number, string, string];
+type WorkerLedgerRow = [string, number, string];
 
-const WORKER_HEADER_ROW: (string | number)[] = ['Date', 'Type', 'Amount', 'For Month', 'Note'];
+const WORKER_HEADER_ROW: (string | number)[] = ['Date', 'Advance', 'Note'];
 
-function workerLedgerRows(
-  worker: Worker,
-  advances: WorkerAdvance[],
-  payments: WorkerPayment[]
-): { rows: WorkerLedgerRow[]; totalAdvances: number; totalPaid: number } {
-  const ownAdvances = advances.filter((a) => a.workerId === worker.id);
-  const ownPayments = payments.filter((p) => p.workerId === worker.id);
-
-  type Event = { date: string; type: string; amount: number; forMonth: string; note: string };
-  const events: Event[] = [
-    ...ownAdvances.map((a) => ({ date: a.date, type: 'Advance', amount: a.amount, forMonth: '', note: a.note ?? '' })),
-    ...ownPayments.map((p) => ({
-      date: p.paymentDate,
-      type: 'Salary Settlement',
-      amount: p.amount,
-      forMonth: p.forMonth,
-      note: p.note ?? '',
-    })),
-  ].sort((a, b) => (a.date < b.date ? -1 : 1));
-
-  const rows: WorkerLedgerRow[] = events.map((e) => [e.date, e.type, e.amount, e.forMonth, e.note]);
-  const totalAdvances = ownAdvances.reduce((sum, a) => sum + a.amount, 0);
-  const totalPaid = ownPayments.reduce((sum, p) => sum + p.amount, 0);
-
-  return { rows, totalAdvances, totalPaid };
+function salaryToPay(worker: Worker): number {
+  return Math.max(0, worker.monthlySalary - worker.advancesThisMonth);
 }
 
-function workerSheet(worker: Worker, advances: WorkerAdvance[], payments: WorkerPayment[]) {
-  const { rows, totalAdvances, totalPaid } = workerLedgerRows(worker, advances, payments);
+function workerSheet(worker: Worker, advances: WorkerAdvance[]) {
+  const own = advances.filter((a) => a.workerId === worker.id).sort((a, b) => (a.date < b.date ? -1 : 1));
+  const rows: WorkerLedgerRow[] = own.map((a) => [a.date, a.amount, a.note ?? '']);
+  const totalAdvances = own.reduce((sum, a) => sum + a.amount, 0);
 
   const aoa: (WorkerLedgerRow | (string | number)[])[] = [
     ['Worker', worker.name],
     ['Monthly Salary', formatINR(worker.monthlySalary)],
     [],
-    ['This Month — Advances', formatINR(worker.advancesThisMonth)],
-    ['This Month — Paid', formatINR(worker.paidThisMonth)],
-    ['This Month — Remaining', formatINR(worker.remainingThisMonth)],
+    ['This Month — Advances taken', formatINR(worker.advancesThisMonth)],
+    ['This Month — Salary to pay (after advances)', formatINR(salaryToPay(worker))],
     [],
     WORKER_HEADER_ROW,
     ...rows,
     [],
-    ['', 'Total Advances (all time)', totalAdvances, '', ''],
-    ['', 'Total Settlements Paid (all time)', totalPaid, '', ''],
+    ['Total advances (all time)', totalAdvances, ''],
   ];
 
   return XLSX.utils.aoa_to_sheet(aoa);
 }
 
-export function exportWorkerLedger(worker: Worker, advances: WorkerAdvance[], payments: WorkerPayment[]) {
+export function exportWorkerLedger(worker: Worker, advances: WorkerAdvance[]) {
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, workerSheet(worker, advances, payments), 'Ledger');
-  XLSX.writeFile(wb, `${worker.name.replace(/\s+/g, '_')}_Ledger.xlsx`);
+  XLSX.utils.book_append_sheet(wb, workerSheet(worker, advances), 'Advances');
+  XLSX.writeFile(wb, `${worker.name.replace(/\s+/g, '_')}_Advances.xlsx`);
 }
 
-export function exportAllWorkersLedger(workers: Worker[], advances: WorkerAdvance[], payments: WorkerPayment[]) {
+export function exportAllWorkersLedger(workers: Worker[], advances: WorkerAdvance[]) {
   const wb = XLSX.utils.book_new();
 
   const overview = workers.map((w) => ({
     Worker: w.name,
     'Monthly Salary': w.monthlySalary,
     'Advances This Month': w.advancesThisMonth,
-    'Paid This Month': w.paidThisMonth,
-    'Remaining This Month': w.remainingThisMonth,
+    'Salary To Pay (after advances)': salaryToPay(w),
   }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(overview), 'All Workers');
 
   const usedNames = new Set<string>(['All Workers']);
   workers.forEach((w) => {
     const sheetName = safeSheetName(w.name, usedNames);
-    XLSX.utils.book_append_sheet(wb, workerSheet(w, advances, payments), sheetName);
+    XLSX.utils.book_append_sheet(wb, workerSheet(w, advances), sheetName);
   });
 
-  XLSX.writeFile(wb, 'Century_Glass_Art_All_Worker_Ledgers.xlsx');
+  XLSX.writeFile(wb, 'Century_Glass_Art_All_Worker_Advances.xlsx');
 }
 
 // ============================================================

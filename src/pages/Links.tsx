@@ -22,7 +22,7 @@ export default function Links() {
       <Topbar title="Important Links" subtitle="Every link the business uses regularly, in one place" />
       <div className="view-body">
         <div className="chip-row">
-          <button className="btn btn-ghost btn-small desktop-only" onClick={openLinkModal}>
+          <button className="btn btn-ghost btn-small" onClick={openLinkModal}>
             + New Link
           </button>
         </div>

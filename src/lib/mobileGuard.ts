@@ -10,6 +10,10 @@
 // boundary (see useIsMobile.ts) — the real enforcement for who can read/
 // write what is Supabase RLS.
 
+// NOTE: a few areas are intentionally editable on mobile (Expenses, staff
+// advances/workers, Employee Control, Important Links). Their actions are
+// left unwrapped in AppContext's value — see the EXCEPTION comment there.
+
 let lastNoticeAt = 0;
 
 export function notifyDesktopOnly(): void {

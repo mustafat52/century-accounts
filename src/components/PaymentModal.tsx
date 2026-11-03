@@ -10,8 +10,7 @@ import { formatINR, capitalizeFirst, todayLocal } from '../utils/format';
 // an invoice's "Record Payment" (Invoicing page) opens this modal for its
 // SOURCE quotation, so converted bills with a balance are collected here too.
 export default function PaymentModal() {
-  const { isPaymentModalOpen, paymentModalQuotationDbId, closePaymentModal, quotations, recordQuotationPayment, openPrint } =
-    useApp();
+  const { isPaymentModalOpen, paymentModalQuotationDbId, closePaymentModal, quotations, recordQuotationPayment } = useApp();
 
   const quotation = paymentModalQuotationDbId ? quotations.find((q) => q.dbId === paymentModalQuotationDbId) : undefined;
 
@@ -38,12 +37,11 @@ export default function PaymentModal() {
     setSaving(true);
     const receipt = await recordQuotationPayment(paymentModalQuotationDbId, amountNum, method, note || undefined);
     setSaving(false);
-    // Only close and print when the payment was really recorded — on a
-    // failure (already toasted) the modal stays open with the entry intact.
+    // Only close when the payment was really recorded — on a failure
+    // (already toasted) the modal stays open with the entry intact. The
+    // ledger / receipt can still be printed later from the bill's row.
     if (!receipt) return;
     closePaymentModal();
-    // Immediately offer the printable ledger showing this payment.
-    openPrint('quotation', quotation.id);
   };
 
   return (
@@ -105,7 +103,7 @@ export default function PaymentModal() {
             Cancel
           </button>
           <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving…' : 'Save & print receipt'}
+            {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
       </div>

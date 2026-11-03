@@ -180,6 +180,7 @@ export function mapWorkerAdvance(row: any): WorkerAdvance {
     amount: Number(row.amount),
     date: row.advance_date,
     note: row.note ?? undefined,
+    linkedExpenseId: row.linked_expense_id ?? null,
   };
 }
 

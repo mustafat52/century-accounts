@@ -55,7 +55,10 @@ export default function ExpenseModal() {
             <div className="form-field">
               <label>Category</label>
               <select value={category} onChange={(e) => setCategory(e.target.value as ExpenseCategory)}>
-                {CATEGORIES.filter((c) => c !== 'Raw Material').map((c) => (
+                {/* Staff advances are recorded from the "Staff advances" tab (they create
+                    their own expense entry), and salary payments aren't tracked — so
+                    neither is offered as a manual category. */}
+                {CATEGORIES.filter((c) => c !== 'Raw Material' && c !== 'Payslips & Wages').map((c) => (
                   <option key={c} value={c}>
                     {c}
                   </option>

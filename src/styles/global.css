@@ -754,6 +754,10 @@ tbody tr:hover { background: var(--surface-2); }
 
   .desktop-only { display: none !important; }
 
+  /* Modals can have 3 footer buttons (e.g. Close / Edit Salary / Export) —
+     let them wrap instead of running off a narrow screen. */
+  .modal-foot { flex-wrap: wrap; }
+
   .topbar { flex-direction: column; align-items: flex-start; gap: 10px; padding: 20px 20px 16px; }
   .view-body { padding: 20px; }
 

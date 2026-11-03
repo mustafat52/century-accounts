@@ -4,9 +4,10 @@ import VendorModal from '../components/VendorModal';
 import VendorPaymentModal from '../components/VendorPaymentModal';
 import VendorSlipModal from '../components/VendorSlipModal';
 import PriceSlipModal from '../components/PriceSlipModal';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { useApp } from '../context/AppContext';
 import { formatINR } from '../utils/format';
-import type { VendorPurchase, VendorSlip } from '../types';
+import type { Vendor, VendorPurchase, VendorSlip } from '../types';
 
 // A unified purchase-history row — either a priced purchase (quick entry OR
 // a slip that's already been priced, in which case its DC No/Care Of are
@@ -24,13 +25,24 @@ interface HistoryRow {
 }
 
 export default function Vendors() {
-  const { vendors, vendorPurchases, vendorPayments, vendorSlips, openVendorModal, openEditVendorModal, openPrint } =
-    useApp();
+  const {
+    vendors,
+    vendorPurchases,
+    vendorPayments,
+    vendorSlips,
+    openVendorModal,
+    openEditVendorModal,
+    openPrint,
+    deleteVendor,
+    showToast,
+  } = useApp();
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
   const [slipModalVendorId, setSlipModalVendorId] = useState<string | null>(null);
   const [paymentVendorId, setPaymentVendorId] = useState<string | null>(null);
   const [pricingSlip, setPricingSlip] = useState<VendorSlip | null>(null);
   const [search, setSearch] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<Vendor | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const selectedVendor = vendors.find((v) => v.id === selectedVendorId);
   const paymentVendor = vendors.find((v) => v.id === paymentVendorId) ?? null;
@@ -97,6 +109,54 @@ export default function Vendors() {
       .sort((a, b) => (a.paymentDate < b.paymentDate ? 1 : -1));
   }, [selectedVendorId, vendorPurchases, vendorPayments]);
 
+  // What deleting the vendor would take with it — shown in the confirmation
+  // so nobody wipes a vendor's purchase history by accident.
+  const deleteSummary = useMemo(() => {
+    if (!deleteTarget) return null;
+    const purchases = vendorPurchases.filter((p) => p.vendorId === deleteTarget.id);
+    const ids = new Set(purchases.map((p) => p.id));
+    const payments = vendorPayments.filter((p) => ids.has(p.expenseId));
+    return {
+      purchaseCount: purchases.length,
+      purchaseTotal: purchases.reduce((sum, p) => sum + p.amount, 0),
+      paymentCount: payments.length,
+      paidTotal: payments.reduce((sum, p) => sum + p.amount, 0),
+      slipCount: vendorSlips.filter((s) => s.vendorId === deleteTarget.id).length,
+    };
+  }, [deleteTarget, vendorPurchases, vendorPayments, vendorSlips]);
+
+  const hasHistory = !!deleteSummary && (deleteSummary.purchaseCount > 0 || deleteSummary.slipCount > 0);
+
+  const handleDeleteVendor = async () => {
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
+    const ok = await deleteVendor(deleteTarget.id);
+    setDeleting(false);
+    if (ok) {
+      showToast(`${deleteTarget.name} deleted.`, 'success');
+      setSelectedVendorId(null);
+      setDeleteTarget(null);
+    }
+  };
+
+  const deleteDialog = (
+    <ConfirmDialog
+      open={deleteTarget !== null}
+      danger
+      title={deleteTarget ? `Delete ${deleteTarget.name}?` : 'Delete vendor?'}
+      message={
+        deleteTarget && deleteSummary
+          ? hasHistory
+            ? `${deleteTarget.name} has ${deleteSummary.purchaseCount} purchase${deleteSummary.purchaseCount !== 1 ? 's' : ''} (${formatINR(deleteSummary.purchaseTotal)}), ${deleteSummary.paymentCount} payment${deleteSummary.paymentCount !== 1 ? 's' : ''} (${formatINR(deleteSummary.paidTotal)} paid) and ${deleteSummary.slipCount} slip${deleteSummary.slipCount !== 1 ? 's' : ''}. Deleting the vendor permanently removes ALL of these, so your total expenses and Reports will go down by ${formatINR(deleteSummary.purchaseTotal)}. This can't be undone.`
+            : `${deleteTarget.name} has no purchases, payments or slips recorded. This can't be undone.`
+          : ''
+      }
+      confirmLabel={deleting ? 'Deleting…' : hasHistory ? 'Delete vendor and records' : 'Delete vendor'}
+      onConfirm={handleDeleteVendor}
+      onCancel={() => !deleting && setDeleteTarget(null)}
+    />
+  );
+
   if (selectedVendor) {
     return (
       <>
@@ -109,9 +169,18 @@ export default function Vendors() {
             <button className="btn btn-ghost btn-small" onClick={() => setSelectedVendorId(null)}>
               ← All vendors
             </button>
-            <button className="btn btn-ghost btn-small desktop-only" onClick={() => openEditVendorModal(selectedVendor.id)}>
-              Edit Vendor
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-ghost btn-small desktop-only" onClick={() => openEditVendorModal(selectedVendor.id)}>
+                Edit Vendor
+              </button>
+              <button
+                className="btn btn-ghost btn-small desktop-only"
+                style={{ color: 'var(--danger)' }}
+                onClick={() => setDeleteTarget(selectedVendor)}
+              >
+                Delete Vendor
+              </button>
+            </div>
           </div>
 
           <div className="stat-grid" style={{ marginBottom: 24 }}>
@@ -281,6 +350,7 @@ export default function Vendors() {
         <VendorPaymentModal vendor={paymentVendor} onClose={() => setPaymentVendorId(null)} />
         <PriceSlipModal slip={pricingSlip} onClose={() => setPricingSlip(null)} />
         <VendorModal />
+        {deleteDialog}
       </>
     );
   }
@@ -323,12 +393,13 @@ export default function Vendors() {
                 <th>Category</th>
                 <th>Total purchased</th>
                 <th>Payable</th>
+                <th className="desktop-only"></th>
               </tr>
             </thead>
             <tbody>
               {filteredVendors.length === 0 && (
                 <tr>
-                  <td className="row-sub" colSpan={4}>
+                  <td className="row-sub" colSpan={5}>
                     No vendors match “{search}”.
                   </td>
                 </tr>
@@ -351,6 +422,18 @@ export default function Vendors() {
                     <span className="mobile-label">Payable</span>
                     {v.payable > 0 ? formatINR(v.payable) : 'Settled'}
                   </td>
+                  <td className="card-actions desktop-only" style={{ textAlign: 'right' }}>
+                    <button
+                      className="btn btn-ghost btn-small"
+                      style={{ color: 'var(--danger)' }}
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        setDeleteTarget(v);
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -359,6 +442,7 @@ export default function Vendors() {
         </div>
       </div>
       <VendorModal />
+      {deleteDialog}
     </>
   );
 }

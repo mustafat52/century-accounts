@@ -52,7 +52,7 @@ export default function EmployeeControl() {
             <h3>
               {employees.length} login{employees.length !== 1 ? 's' : ''}
             </h3>
-            <button className="btn btn-primary btn-small desktop-only" onClick={() => setAddOpen(true)}>
+            <button className="btn btn-primary btn-small" onClick={() => setAddOpen(true)}>
               + Add Employee
             </button>
           </div>
@@ -111,7 +111,7 @@ export default function EmployeeControl() {
                       <td className="card-actions">
                         {!isOwnerRow && (
                           <button
-                            className="btn btn-ghost btn-small desktop-only"
+                            className="btn btn-ghost btn-small"
                             onClick={() => setDeleteTarget(emp)}
                             disabled={busyId === emp.id}
                           >

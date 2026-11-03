@@ -305,6 +305,8 @@ export interface WorkerAdvance {
   amount: number;
   date: string;
   note?: string;
+  /** The expenses row this advance created — deleting the advance removes it too. */
+  linkedExpenseId?: string | null;
 }
 
 // A salary SETTLEMENT payment — distinct from an advance. forMonth is
