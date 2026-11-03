@@ -843,6 +843,21 @@ tbody tr:hover { background: var(--surface-2); }
      that's still one tap away (row opens a detail view) rather than
      cluttering the card. */
   .table-cards .card-hide { display: none; }
+
+  /* Keep the cards INSIDE the screen. The <table> element itself used to
+     stay a real table on phones, and a table sizes itself to its widest
+     content — a long description or amount breakdown inflated it past the
+     panel, so each card ran off the right edge and the whole list had to
+     be scrolled sideways (the status badge and amount ended up off-screen).
+     Making the table a plain block, letting cells shrink (min-width: 0) and
+     letting any long unbroken text wrap removes that. */
+  .table-cards { display: block; width: 100%; max-width: 100%; }
+  .table-cards tbody { width: 100%; }
+  .table-cards tbody tr { box-sizing: border-box; width: 100%; max-width: 100%; }
+  .table-cards td { min-width: 0; overflow-wrap: anywhere; }
+
+  /* A search box that should span the full row on a phone. */
+  .search-input-grow { flex: 1 1 100%; width: 100%; min-width: 0; box-sizing: border-box; }
 }
 
 /* Activity Log (phone): the filters sit in a compact two-column grid. */

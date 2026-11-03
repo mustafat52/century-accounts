@@ -150,7 +150,7 @@ export default function Invoicing() {
           </div>
           <input
             type="text"
-            className="search-input"
+            className="search-input search-input-grow"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by customer, number or description…"
@@ -317,6 +317,7 @@ export default function Invoicing() {
                     </td>
                     <td className="card-tag-muted">{customerName(i.customerId)}</td>
                     <td className="num card-amount">
+                      <span className="mobile-label">Total</span>
                       {formatINR(i.amount - i.discountAmount + i.gst + i.transportation)}
                       {i.gst > 0 && (
                         <div className="row-sub">
@@ -325,7 +326,7 @@ export default function Invoicing() {
                       )}
                       {i.transportation > 0 && <div className="row-sub">+ Transport {formatINR(i.transportation)}</div>}
                     </td>
-                    <td className="num card-amount">
+                    <td className="num card-line">
                       {src ? (
                         <>
                           <span className="mobile-label">Pending</span>
