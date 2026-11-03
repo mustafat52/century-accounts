@@ -15,6 +15,7 @@ export default function PaymentModal() {
   const quotation = paymentModalQuotationDbId ? quotations.find((q) => q.dbId === paymentModalQuotationDbId) : undefined;
 
   const [amount, setAmount] = useState('');
+  const [date, setDate] = useState(todayLocal());
   const [method, setMethod] = useState<PaymentMethod>('cash');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
@@ -22,6 +23,7 @@ export default function PaymentModal() {
   useEffect(() => {
     if (isPaymentModalOpen) {
       setAmount('');
+      setDate(todayLocal());
       setMethod('cash');
       setNote('');
       setSaving(false);
@@ -33,9 +35,9 @@ export default function PaymentModal() {
   const amountNum = parseFloat(amount) || 0;
 
   const handleSave = async () => {
-    if (amountNum <= 0 || amountNum > quotation.balanceAmount || !paymentModalQuotationDbId || saving) return;
+    if (amountNum <= 0 || amountNum > quotation.balanceAmount || !date || !paymentModalQuotationDbId || saving) return;
     setSaving(true);
-    const receipt = await recordQuotationPayment(paymentModalQuotationDbId, amountNum, method, note || undefined);
+    const receipt = await recordQuotationPayment(paymentModalQuotationDbId, amountNum, method, note || undefined, date);
     setSaving(false);
     // Only close when the payment was really recorded — on a failure
     // (already toasted) the modal stays open with the entry intact. The
@@ -65,8 +67,8 @@ export default function PaymentModal() {
               <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
             </div>
             <div className="form-field">
-              <label>Date</label>
-              <input type="text" disabled value={todayLocal()} />
+              <label>Date received</label>
+              <input type="date" value={date} max={todayLocal()} onChange={(e) => setDate(e.target.value)} />
             </div>
           </div>
 
@@ -102,7 +104,7 @@ export default function PaymentModal() {
           <button className="btn btn-ghost" onClick={closePaymentModal}>
             Cancel
           </button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving || !date}>
             {saving ? 'Saving…' : 'Save'}
           </button>
         </div>

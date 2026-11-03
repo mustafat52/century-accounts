@@ -269,7 +269,9 @@ interface AppContextValue {
     quotationDbId: string,
     amount: number,
     method: PaymentMethod,
-    note?: string
+    note?: string,
+    // The day the money was actually received (YYYY-MM-DD). Defaults to today.
+    date?: string
   ) => Promise<PaymentReceipt | null>;
 
   workers: Worker[];
@@ -279,6 +281,9 @@ interface AppContextValue {
   logWorkerAdvance: (input: NewWorkerAdvanceInput) => Promise<boolean>;
   // Removes an advance AND the expense entry it created.
   deleteWorkerAdvance: (advanceId: string) => Promise<boolean>;
+  // Removes a worker, all their advances, and the expense entries those
+  // advances created.
+  deleteWorker: (workerId: string) => Promise<boolean>;
   workerPayments: WorkerPayment[];
   recordWorkerPayment: (workerId: string, amount: number, date: string, forMonth: string, note?: string) => Promise<boolean>;
 
@@ -1503,7 +1508,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     quotationDbId: string,
     amount: number,
     method: PaymentMethod,
-    note?: string
+    note?: string,
+    date?: string
   ): Promise<PaymentReceipt | null> => {
     const { data, error } = await supabase.rpc('record_quotation_payment', {
       p_quotation_id: quotationDbId,
@@ -1516,6 +1522,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return null;
     }
 
+    // The RPC stamps the payment with its own date (today). When the person
+    // picked a different day, correct it on the row that was just created —
+    // done here, rather than by changing the RPC, so the balance/status rules
+    // inside it stay exactly as they are. If this step fails the payment is
+    // still recorded (as today) and the person is told.
+    let paymentDate: string = data.payment_date;
+    if (date && date !== paymentDate) {
+      let paymentId: string | undefined = data.id;
+      if (!paymentId) {
+        const latest = await supabase
+          .from('quotation_payments')
+          .select('id')
+          .eq('quotation_id', quotationDbId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        paymentId = latest.data?.id;
+      }
+      const upd = paymentId
+        ? await supabase.from('quotation_payments').update({ payment_date: date }).eq('id', paymentId).select('payment_date')
+        : null;
+      if (upd && !upd.error && upd.data && upd.data.length > 0) {
+        paymentDate = upd.data[0].payment_date;
+      } else {
+        reportError('Setting the payment date', upd?.error ?? null);
+        showToast(`Payment saved, but its date could not be changed — it was recorded as ${paymentDate}.`, 'error');
+      }
+    }
+
     await Promise.all([refreshQuotations(), refreshQuotationPayments(), refreshCustomers(), refreshDashboardSummary()]);
 
     const updatedQuotation = await supabase.from('quotations_effective').select('*').eq('id', quotationDbId).single();
@@ -1524,7 +1559,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const receipt: PaymentReceipt = {
       paymentAmount: Number(data.amount),
-      paymentDate: data.payment_date,
+      paymentDate,
       method: data.method,
       note: data.note ?? undefined,
       quotation,
@@ -1618,6 +1653,49 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     await Promise.all([refreshWorkers(), refreshExpenses(), refreshWorkerAdvances()]);
     return ok;
+  };
+
+  // Deletes a worker together with their advances AND the expense entries
+  // those advances created (otherwise deleting the worker would leave the
+  // advances behind as ordinary expenses). Not one transaction — on any
+  // failure everything is refreshed to show what really remains, and the
+  // delete can be run again to finish.
+  const deleteWorker = async (workerId: string): Promise<boolean> => {
+    const refreshAfter = () =>
+      Promise.all([refreshWorkers(), refreshWorkerAdvances(), refreshWorkerPayments(), refreshExpenses()]);
+    const fail = async (context: string, error: { message?: string } | null) => {
+      reportError(context, error);
+      await refreshAfter();
+      return false;
+    };
+
+    const owned = await supabase.from('worker_advances').select('linked_expense_id').eq('worker_id', workerId);
+    if (owned.error) return fail('Looking up the worker’s advances', owned.error);
+    const expenseIds = (owned.data ?? []).map((r) => r.linked_expense_id as string | null).filter((id): id is string => !!id);
+
+    const adv = await supabase.from('worker_advances').delete().eq('worker_id', workerId);
+    if (adv.error) return fail('Deleting the worker’s advances', adv.error);
+
+    if (expenseIds.length > 0) {
+      const exps = await supabase.from('expenses').delete().in('id', expenseIds).is('vendor_id', null);
+      if (exps.error) return fail('Removing the advances from expenses', exps.error);
+    }
+
+    // Old salary-settlement records (no longer used by the app) would
+    // otherwise block the delete if the database restricts them.
+    const pays = await supabase.from('worker_payments').delete().eq('worker_id', workerId);
+    if (pays.error) return fail('Deleting the worker’s old payment records', pays.error);
+
+    const { data, error } = await supabase.from('workers').delete().eq('id', workerId).select('id');
+    if (error) return fail('Deleting worker', error);
+    if (!data || data.length === 0) {
+      showToast('That worker could not be deleted — they may already be gone.', 'error');
+      await refreshAfter();
+      return false;
+    }
+    setWorkers((prev) => prev.filter((w) => w.id !== workerId));
+    await refreshAfter();
+    return true;
   };
 
   // Records a salary SETTLEMENT payment — distinct from an advance. Always
@@ -1721,6 +1799,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       updateWorker,
       logWorkerAdvance,
       deleteWorkerAdvance,
+      deleteWorker,
       addLink,
       setEmployeeActive,
       createEmployee,

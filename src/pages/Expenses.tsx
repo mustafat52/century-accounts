@@ -228,6 +228,7 @@ export default function Expenses() {
     openWorkerModal,
     archiveExpenses,
     deleteExpense,
+    deleteWorker,
     showToast,
   } = useApp();
 
@@ -241,6 +242,8 @@ export default function Expenses() {
   const [closing, setClosing] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [workerDeleteTarget, setWorkerDeleteTarget] = useState<Worker | null>(null);
+  const [deletingWorker, setDeletingWorker] = useState(false);
 
   // Archived rows (see "Close Month") are hidden from this page only —
   // Reports and the dashboard still read the full list from context, so
@@ -334,6 +337,28 @@ export default function Expenses() {
   };
 
   const deleteAdvanceOwner = deleteTarget ? advanceByExpenseId.get(deleteTarget.id) : undefined;
+
+  // What deleting a worker takes with it (shown in the confirmation).
+  const workerDeleteSummary = useMemo(() => {
+    if (!workerDeleteTarget) return null;
+    const own = workerAdvances.filter((a) => a.workerId === workerDeleteTarget.id);
+    return {
+      count: own.length,
+      total: own.reduce((sum, a) => sum + a.amount, 0),
+      inExpenses: own.filter((a) => a.linkedExpenseId).reduce((sum, a) => sum + a.amount, 0),
+    };
+  }, [workerDeleteTarget, workerAdvances]);
+
+  const handleDeleteWorker = async () => {
+    if (!workerDeleteTarget || deletingWorker) return;
+    setDeletingWorker(true);
+    const ok = await deleteWorker(workerDeleteTarget.id);
+    setDeletingWorker(false);
+    if (ok) {
+      showToast(`${workerDeleteTarget.name} deleted.`, 'success');
+      setWorkerDeleteTarget(null);
+    }
+  };
 
   return (
     <>
@@ -538,15 +563,27 @@ export default function Expenses() {
                           {formatINR(w.advancesThisMonth)}
                         </td>
                         <td className="card-actions" style={{ textAlign: 'right' }}>
-                          <button
-                            className="btn btn-primary btn-small"
-                            onClick={(ev) => {
-                              ev.stopPropagation();
-                              setSelectedWorkerId(w.id);
-                            }}
-                          >
-                            Give advance
-                          </button>
+                          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                            <button
+                              className="btn btn-primary btn-small"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                setSelectedWorkerId(w.id);
+                              }}
+                            >
+                              Give advance
+                            </button>
+                            <button
+                              className="btn btn-ghost btn-small"
+                              style={{ color: 'var(--danger)' }}
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                setWorkerDeleteTarget(w);
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -582,6 +619,25 @@ export default function Expenses() {
         confirmLabel={deleting ? 'Deleting…' : 'Delete expense'}
         onConfirm={handleDeleteExpense}
         onCancel={() => !deleting && setDeleteTarget(null)}
+      />
+      <ConfirmDialog
+        open={workerDeleteTarget !== null}
+        danger
+        title={workerDeleteTarget ? `Delete ${workerDeleteTarget.name}?` : 'Delete worker?'}
+        message={
+          workerDeleteTarget && workerDeleteSummary
+            ? workerDeleteSummary.count > 0
+              ? `${workerDeleteTarget.name} has ${workerDeleteSummary.count} advance${workerDeleteSummary.count !== 1 ? 's' : ''} recorded (${formatINR(workerDeleteSummary.total)} in total). Deleting removes the worker and their whole advance history${
+                  workerDeleteSummary.inExpenses > 0
+                    ? `, and the matching entries in Expenses — so your total expenses and Reports will go down by ${formatINR(workerDeleteSummary.inExpenses)}`
+                    : ''
+                }. This can't be undone.`
+              : `${workerDeleteTarget.name} has no advances recorded. This can't be undone.`
+            : ''
+        }
+        confirmLabel={deletingWorker ? 'Deleting…' : workerDeleteSummary && workerDeleteSummary.count > 0 ? 'Delete worker and history' : 'Delete worker'}
+        onConfirm={handleDeleteWorker}
+        onCancel={() => !deletingWorker && setWorkerDeleteTarget(null)}
       />
       <ExpenseModal />
       <WorkerModal />
