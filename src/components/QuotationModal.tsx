@@ -149,7 +149,11 @@ function draftsToPayload(drafts: DraftItem[]): NewQuotationItemInput[] {
 const effectiveDiscount = (slab: InvoiceSlab, custom: string) => (slab === 'A' ? parseFloat(custom) || 0 : SLAB_DISCOUNT_PERCENT[slab]);
 
 // Used to skip the write entirely when Edit is saved with nothing changed.
-function buildSnapshot(h: { validUntil: string; slab: InvoiceSlab; discount: number; transport: number; gst: boolean }, payload: NewQuotationItemInput[]) {
+// Who in the business can be put in charge of a site / project (same people
+// as the vendor slips use).
+const CARE_OF_CHOICES = ['Shabbir Bhai', 'Abdul Hussain Bhai', 'Taqi Bhai'];
+
+function buildSnapshot(h: { validUntil: string; slab: InvoiceSlab; discount: number; transport: number; gst: boolean; careOf: string }, payload: NewQuotationItemInput[]) {
   return JSON.stringify({ ...h, payload });
 }
 
@@ -185,6 +189,7 @@ export default function QuotationModal() {
   const [slab, setSlab] = useState<InvoiceSlab>('A');
   const [customDiscount, setCustomDiscount] = useState('0');
   const [transportation, setTransportation] = useState('');
+  const [careOf, setCareOf] = useState('');
   const [items, setItems] = useState<DraftItem[]>([blankItem('glass')]);
   // Which item-type table is currently shown while editing. Purely a
   // display filter — the saved quotation always combines items of both
@@ -211,6 +216,7 @@ export default function QuotationModal() {
         setCustomDiscount(editingQuotation.slab === 'A' ? String(editingQuotation.discountPercent) : '0');
         setTransportation(editingQuotation.transportation > 0 ? String(editingQuotation.transportation) : '');
         setGstOn(editingQuotation.gst > 0);
+        setCareOf(editingQuotation.careOf ?? '');
         setLoadingItems(true);
         initialSnapshotRef.current = null;
         // Reload the quotation's real saved items into the form — without
@@ -228,6 +234,7 @@ export default function QuotationModal() {
               discount: effectiveDiscount(editingQuotation.slab, editingQuotation.slab === 'A' ? String(editingQuotation.discountPercent) : '0'),
               transport: editingQuotation.transportation || 0,
               gst: editingQuotation.gst > 0,
+              careOf: editingQuotation.careOf ?? '',
             },
             draftsToPayload(draftItems)
           );
@@ -239,6 +246,7 @@ export default function QuotationModal() {
         setSlab('A');
         setCustomDiscount('0');
         setTransportation('');
+        setCareOf('');
         setGstOn(gstEnabled);
         setLoadingItems(false);
         initialSnapshotRef.current = null;
@@ -353,7 +361,7 @@ export default function QuotationModal() {
     let ok: boolean;
     if (editingQuotationId) {
       const snapshot = buildSnapshot(
-        { validUntil, slab, discount: discountPercent, transport: transportNum, gst: gstOn },
+        { validUntil, slab, discount: discountPercent, transport: transportNum, gst: gstOn, careOf },
         payloadItems
       );
       if (snapshot === initialSnapshotRef.current) {
@@ -368,12 +376,13 @@ export default function QuotationModal() {
         slab,
         discountPercent,
         transportation: transportNum,
+        careOf: careOf || null,
         gstEnabled: gstOn,
         items: payloadItems,
       });
     } else {
       ok = Boolean(
-        await addQuotation({ customerId, validUntil, slab, discountPercent, transportation: transportNum, gstEnabled: gstOn, items: payloadItems })
+        await addQuotation({ customerId, validUntil, slab, discountPercent, transportation: transportNum, careOf: careOf || null, gstEnabled: gstOn, items: payloadItems })
       );
     }
     setSaving(false);
@@ -427,6 +436,19 @@ export default function QuotationModal() {
             <div className="form-field">
               <label>Valid until</label>
               <input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
+            </div>
+            <div className="form-field">
+              <label>Care of (who's looking after this site)</label>
+              <select value={careOf} onChange={(e) => setCareOf(e.target.value)}>
+                <option value="">— Not assigned —</option>
+                {CARE_OF_CHOICES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+                {/* Keeps an older value visible if it's no longer in the list. */}
+                {careOf && !CARE_OF_CHOICES.includes(careOf) && <option value={careOf}>{careOf}</option>}
+              </select>
             </div>
           </div>
 

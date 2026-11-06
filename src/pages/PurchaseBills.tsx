@@ -5,7 +5,7 @@ import { useApp } from '../context/AppContext';
 import { formatINR } from '../utils/format';
 
 export default function PurchaseBills() {
-  const { purchaseBills } = useApp();
+  const { purchaseBills, openPrint } = useApp();
   const [isModalOpen, setModalOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -67,9 +67,14 @@ export default function PurchaseBills() {
                         </div>
                       </td>
                       <td className="card-actions">
-                        <button className="btn btn-ghost btn-small" onClick={() => setExpandedId(isExpanded ? null : b.id)}>
-                          {isExpanded ? 'Hide items' : 'View items'}
-                        </button>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          <button className="btn btn-ghost btn-small" onClick={() => openPrint('purchaseBill', b.id)}>
+                            Print
+                          </button>
+                          <button className="btn btn-ghost btn-small" onClick={() => setExpandedId(isExpanded ? null : b.id)}>
+                            {isExpanded ? 'Hide items' : 'View items'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                     {isExpanded && (

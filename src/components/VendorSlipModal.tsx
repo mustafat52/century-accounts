@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import type { CareOf } from '../types';
-import { capitalizeFirst } from '../utils/format';
+import type { CareOf, VendorSlip } from '../types';
+import { capitalizeFirst, formatINR } from '../utils/format';
 
 const CARE_OF_OPTIONS: CareOf[] = ['Shabbir Bhai', 'Abdul Hussain Bhai', 'Taqi Bhai'];
 
@@ -14,22 +14,38 @@ const DEFAULT_UNIT = 'pcs';
 
 interface DraftItem {
   key: string;
+  id?: string; // set for items that already exist on the slip being edited
+  unit?: string;
   description: string;
   quantity: string;
+  rate: string; // only used when editing an already-priced slip
 }
 
 let draftKeyCounter = 0;
 function blankItem(): DraftItem {
   draftKeyCounter += 1;
-  return { key: `slip-item-${draftKeyCounter}`, description: '', quantity: '' };
+  return { key: `slip-item-${draftKeyCounter}`, description: '', quantity: '', rate: '' };
 }
 
 function isItemValid(it: DraftItem): boolean {
   return Boolean(it.description.trim() && (parseFloat(it.quantity) || 0) > 0);
 }
 
-export default function VendorSlipModal({ vendorId, onClose }: { vendorId: string | null; onClose: () => void }) {
-  const { vendors, addVendorSlip, openPrint } = useApp();
+// Creates a new slip (editSlip is null/undefined) or edits an existing one.
+//  - A slip still waiting for prices can change freely.
+//  - A priced slip (settled or not) can always change its labels and item
+//    text; quantities and rates only while no payment has been recorded
+//    against it, because they feed the amount the vendor is owed.
+export default function VendorSlipModal({
+  vendorId,
+  editSlip,
+  onClose,
+}: {
+  vendorId: string | null;
+  editSlip?: VendorSlip | null;
+  onClose: () => void;
+}) {
+  const { vendors, vendorPurchases, addVendorSlip, updateVendorSlip, openPrint } = useApp();
 
   const [careOf, setCareOf] = useState<CareOf>('Shabbir Bhai');
   // Optional free text — which customer this material purchase is for, if
@@ -42,20 +58,42 @@ export default function VendorSlipModal({ vendorId, onClose }: { vendorId: strin
 
   const vendor = vendorId ? vendors.find((v) => v.id === vendorId) : undefined;
 
+  const isEditing = !!editSlip;
+  const isPriced = !!editSlip && editSlip.status !== 'pending_pricing';
+  const purchase = editSlip?.expenseId ? vendorPurchases.find((p) => p.id === editSlip.expenseId) : undefined;
+  const moneyLocked = isPriced && !!purchase && purchase.paidAmount > 0;
+
   useEffect(() => {
-    if (vendorId) {
+    if (!vendorId) return;
+    if (editSlip) {
+      setCareOf(editSlip.careOf);
+      setCustomerName(editSlip.customerName ?? '');
+      setItems(
+        editSlip.items.map((it) => {
+          draftKeyCounter += 1;
+          return {
+            key: `slip-item-${draftKeyCounter}`,
+            id: it.id,
+            unit: it.unit,
+            description: it.description,
+            quantity: String(it.quantity),
+            rate: it.rate != null ? String(it.rate) : '',
+          };
+        })
+      );
+    } else {
       setCareOf('Shabbir Bhai');
       setCustomerName('');
       setItems([blankItem()]);
     }
-  }, [vendorId]);
+  }, [vendorId, editSlip]);
 
   // Auto-add: the moment the last row becomes fully valid, silently
   // append a fresh blank row — same pattern as Invoice/Quotation items,
   // so entering several products in a row never requires clicking
-  // "+ Add Item" in between.
+  // "+ Add Item" in between. Not for priced slips (their item list is fixed).
   useEffect(() => {
-    if (items.length === 0) return;
+    if (isPriced || items.length === 0) return;
     const last = items[items.length - 1];
     if (isItemValid(last)) {
       setItems((prev) => {
@@ -80,11 +118,32 @@ export default function VendorSlipModal({ vendorId, onClose }: { vendorId: strin
   };
 
   const realItems = items.filter(isItemValid);
-  const isValid = realItems.length > 0;
+  const ratesOk = !isPriced || moneyLocked || realItems.every((it) => (parseFloat(it.rate) || 0) > 0);
+  const isValid = realItems.length > 0 && ratesOk;
+  const pricedTotal = realItems.reduce((sum, it) => sum + (parseFloat(it.quantity) || 0) * (parseFloat(it.rate) || 0), 0);
 
   const handleSave = async () => {
     if (!isValid || saving) return;
     setSaving(true);
+
+    if (editSlip) {
+      const ok = await updateVendorSlip({
+        slipId: editSlip.id,
+        careOf,
+        customerName: customerName.trim() || null,
+        items: realItems.map((it) => ({
+          id: it.id,
+          description: it.description.trim(),
+          quantity: parseFloat(it.quantity) || 0,
+          unit: it.unit ?? DEFAULT_UNIT,
+          rate: isPriced ? parseFloat(it.rate) || 0 : undefined,
+        })),
+      });
+      setSaving(false);
+      if (ok) onClose();
+      return;
+    }
+
     const slip = await addVendorSlip({
       vendorId,
       careOf,
@@ -106,7 +165,7 @@ export default function VendorSlipModal({ vendorId, onClose }: { vendorId: strin
     <div className="modal-overlay is-open">
       <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <h2>New Slip (DC)</h2>
+          <h2>{isEditing ? `Edit Slip — ${editSlip!.dcNo}` : 'New Slip (DC)'}</h2>
           <button className="modal-close" onClick={onClose}>
             &times;
           </button>
@@ -114,9 +173,13 @@ export default function VendorSlipModal({ vendorId, onClose }: { vendorId: strin
 
         <div className="modal-body">
           <div className="row-sub" style={{ marginBottom: 12 }}>
-            A DC number is assigned automatically. No prices are entered here — this slip is for
-            requesting quantities, to be printed and sent to the vendor. Prices get entered later,
-            once the vendor writes them on the returned slip.
+            {!isEditing &&
+              'A DC number is assigned automatically. No prices are entered here — this slip is for requesting quantities, to be printed and sent to the vendor. Prices get entered later, once the vendor writes them on the returned slip.'}
+            {isEditing && !isPriced && 'This slip is still waiting for prices, so everything on it can be changed.'}
+            {isEditing && isPriced && !moneyLocked &&
+              'This slip has been priced. You can change names, quantities and rates — the amount owed to the vendor updates to match.'}
+            {isEditing && isPriced && moneyLocked &&
+              'A payment has already been recorded against this slip, so quantities and rates are locked to keep the vendor’s account correct. You can still change the names and descriptions.'}
           </div>
 
           <div className="form-row">
@@ -154,13 +217,15 @@ export default function VendorSlipModal({ vendorId, onClose }: { vendorId: strin
               <colgroup>
                 <col />
                 <col style={{ width: 120 }} />
-                <col style={{ width: 32 }} />
+                {isPriced && <col style={{ width: 130 }} />}
+                {!isPriced && <col style={{ width: 32 }} />}
               </colgroup>
               <thead>
                 <tr>
                   <th>Description</th>
                   <th className="num">Quantity</th>
-                  <th></th>
+                  {isPriced && <th className="num">Rate (₹)</th>}
+                  {!isPriced && <th></th>}
                 </tr>
               </thead>
               <tbody>
@@ -178,26 +243,48 @@ export default function VendorSlipModal({ vendorId, onClose }: { vendorId: strin
                       <input
                         type="number"
                         value={item.quantity}
+                        disabled={moneyLocked}
                         onChange={(e) => updateItem(item.key, { quantity: e.target.value })}
                         placeholder="0"
                       />
                     </td>
-                    <td>
-                      <button className="item-table-remove" type="button" onClick={() => removeItem(item.key)} title="Remove">
-                        ×
-                      </button>
-                    </td>
+                    {isPriced && (
+                      <td className="num">
+                        <input
+                          type="number"
+                          value={item.rate}
+                          disabled={moneyLocked}
+                          onChange={(e) => updateItem(item.key, { rate: e.target.value })}
+                          placeholder="0.00"
+                        />
+                      </td>
+                    )}
+                    {!isPriced && (
+                      <td>
+                        <button className="item-table-remove" type="button" onClick={() => removeItem(item.key)} title="Remove">
+                          ×
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
 
-          <div style={{ marginBottom: 16 }}>
-            <button className="btn btn-ghost btn-small" onClick={() => setItems((prev) => [...prev, blankItem()])} type="button">
-              + Add Item
-            </button>
-          </div>
+          {isPriced && !moneyLocked && (
+            <div className="row-sub" style={{ marginBottom: 12, textAlign: 'right' }}>
+              New total: <strong>{formatINR(pricedTotal)}</strong>
+            </div>
+          )}
+
+          {!isPriced && (
+            <div style={{ marginBottom: 16 }}>
+              <button className="btn btn-ghost btn-small" onClick={() => setItems((prev) => [...prev, blankItem()])} type="button">
+                + Add Item
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="modal-foot">
@@ -205,7 +292,7 @@ export default function VendorSlipModal({ vendorId, onClose }: { vendorId: strin
             Cancel
           </button>
           <button className="btn btn-primary" onClick={handleSave} disabled={!isValid || saving}>
-            {saving ? 'Saving…' : 'Save & Print Slip'}
+            {saving ? 'Saving…' : isEditing ? 'Save changes' : 'Save & Print Slip'}
           </button>
         </div>
       </div>

@@ -15,7 +15,9 @@ type Tab = 'expenses' | 'advances';
 // Staff advances are saved under this category in the database (and reports
 // group by it). On screen it reads as plain English.
 const CATEGORY_LABEL: Record<string, string> = { 'Payslips & Wages': 'Staff advance' };
-const categoryLabel = (c: string) => CATEGORY_LABEL[c] ?? c;
+// A category the user typed themselves ('Other') shows as their own text.
+const categoryLabel = (e: Pick<Expense, 'category' | 'customCategory'>) =>
+  e.category === 'Other' ? e.customCategory || 'Other' : CATEGORY_LABEL[e.category] ?? e.category;
 
 function monthLabel(): string {
   return new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
@@ -242,6 +244,8 @@ export default function Expenses() {
   const [closing, setClosing] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // Which calendar month the Excel report covers (defaults to this month).
+  const [reportMonth, setReportMonth] = useState(todayLocal().slice(0, 7));
   const [workerDeleteTarget, setWorkerDeleteTarget] = useState<Worker | null>(null);
   const [deletingWorker, setDeletingWorker] = useState(false);
 
@@ -282,7 +286,7 @@ export default function Expenses() {
 
   const byCategory = useMemo(() => {
     const map = new Map<string, number>();
-    expenses.forEach((e) => map.set(categoryLabel(e.category), (map.get(categoryLabel(e.category)) ?? 0) + e.amount));
+    expenses.forEach((e) => map.set(categoryLabel(e), (map.get(categoryLabel(e)) ?? 0) + e.amount));
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
   }, [expenses]);
 
@@ -384,11 +388,26 @@ export default function Expenses() {
               <div className="panel-head">
                 <h3>Expenses — {formatINR(totalGeneral)}</h3>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <input
+                    type="month"
+                    value={reportMonth}
+                    max={todayLocal().slice(0, 7)}
+                    onChange={(e) => setReportMonth(e.target.value)}
+                    title="Month for the Excel report"
+                    style={{ width: 'auto', padding: '6px 10px', fontSize: 13 }}
+                  />
                   <button
                     className="btn btn-ghost btn-small"
-                    onClick={() => exportAllExpenses(allExpenses, vendorPurchases, vendors)}
+                    disabled={!reportMonth}
+                    onClick={() => {
+                      try {
+                        exportAllExpenses(allExpenses, vendorPurchases, vendors, reportMonth);
+                      } catch {
+                        showToast('No expenses were recorded in that month.', 'info');
+                      }
+                    }}
                   >
-                    Export Full Report (Excel)
+                    Export Month Report (Excel)
                   </button>
                   <button
                     className="btn btn-ghost btn-small"
@@ -408,6 +427,7 @@ export default function Expenses() {
                     <tr>
                       <th>Date</th>
                       <th>What it was for</th>
+                      <th>Paid to</th>
                       <th>Category</th>
                       <th>Amount</th>
                       <th></th>
@@ -416,7 +436,7 @@ export default function Expenses() {
                   <tbody>
                     {expenses.length === 0 && (
                       <tr>
-                        <td className="row-sub" colSpan={5}>
+                        <td className="row-sub" colSpan={6}>
                           {archivedMonths.length > 0
                             ? 'No open expenses — the last month was closed. New expenses will appear here.'
                             : 'No expenses recorded yet. Click “+ New Expense” to add one.'}
@@ -428,8 +448,12 @@ export default function Expenses() {
                         <td className="row-sub card-meta">{e.date}</td>
                         <td className="card-main">{e.description}</td>
                         <td className="row-sub card-meta">
+                          <span className="mobile-label">Paid to</span>
+                          {e.paidTo || advanceByExpenseId.get(e.id) || '—'}
+                        </td>
+                        <td className="row-sub card-meta">
                           <span className="mobile-label">Category</span>
-                          {categoryLabel(e.category)}
+                          {categoryLabel(e)}
                         </td>
                         <td className="num card-amount">{formatINR(e.amount)}</td>
                         <td className="card-actions" style={{ textAlign: 'right' }}>

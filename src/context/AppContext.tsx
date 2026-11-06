@@ -96,6 +96,8 @@ interface NewVendorInput {
 
 interface NewExpenseInput {
   category: ExpenseCategory;
+  customCategory?: string; // required when category === 'Other'
+  paidTo?: string;
   description: string;
   amount: number;
   date: string;
@@ -120,6 +122,23 @@ interface NewVendorSlipInput {
   careOf: CareOf;
   customerName?: string | null;
   items: NewVendorSlipItemInput[];
+}
+
+// Editing an existing slip. `id` is set for items that already exist.
+// `rate` only applies to a slip that has already been priced.
+interface EditVendorSlipItemInput {
+  id?: string;
+  description: string;
+  quantity: number;
+  unit?: string;
+  rate?: number | null;
+}
+
+interface EditVendorSlipInput {
+  slipId: string;
+  careOf: CareOf;
+  customerName?: string | null;
+  items: EditVendorSlipItemInput[];
 }
 
 interface NewPurchaseBillItemInput {
@@ -147,6 +166,7 @@ interface NewQuotationInput {
   slab: InvoiceSlab;
   discountPercent: number; // only meaningful when slab === 'A'; otherwise derived from SLAB_DISCOUNT_PERCENT
   transportation: number;
+  careOf?: string | null; // who is looking after this site / project
   gstEnabled?: boolean; // defaults to the global GST switch when omitted
   items: NewQuotationItemInput[];
 }
@@ -156,6 +176,7 @@ interface EditQuotationInput {
   slab: InvoiceSlab;
   discountPercent: number;
   transportation: number;
+  careOf?: string | null;
   gstEnabled: boolean; // the quotation's own GST state, confirmed in the edit modal
   items: NewQuotationItemInput[];
 }
@@ -201,7 +222,7 @@ export interface Toast {
   kind: ToastKind;
 }
 
-export type PrintTarget = { kind: 'invoice' | 'quotation' | 'ledger' | 'slip'; id: string } | null;
+export type PrintTarget = { kind: 'invoice' | 'quotation' | 'ledger' | 'slip' | 'purchaseBill'; id: string } | null;
 
 interface AppContextValue {
   gstEnabled: boolean;
@@ -242,6 +263,10 @@ interface AppContextValue {
   vendorSlips: VendorSlip[];
   addVendorSlip: (input: NewVendorSlipInput) => Promise<VendorSlip | null>;
   priceVendorSlip: (slipId: string, itemRates: { itemId: string; rate: number }[]) => Promise<boolean>;
+  // Edits a slip. A slip still waiting for prices can change freely. A priced
+  // slip can change its labels and item text always, and its quantities and
+  // rates only while no payment has been recorded against it.
+  updateVendorSlip: (input: EditVendorSlipInput) => Promise<boolean>;
 
   purchaseBills: PurchaseBill[];
   addPurchaseBill: (input: NewPurchaseBillInput) => Promise<PurchaseBill | null>;
@@ -334,7 +359,7 @@ interface AppContextValue {
   closePaymentModal: () => void;
 
   printTarget: PrintTarget;
-  openPrint: (kind: 'invoice' | 'quotation' | 'ledger' | 'slip', id: string) => void;
+  openPrint: (kind: 'invoice' | 'quotation' | 'ledger' | 'slip' | 'purchaseBill', id: string) => void;
   closePrint: () => void;
 
   paymentReceipt: PaymentReceipt | null;
@@ -514,10 +539,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (data) setPriceList(data.map(mapPriceListItem));
   }, []);
 
-  const refreshQuotations = useCallback(async () => {
-    const { data } = await supabase.from('quotations_effective').select('*').order('created_at', { ascending: false });
-    if (data) setQuotations(data.map(mapQuotation));
+  // care_of lives on the quotations table. The quotations_effective view
+  // may not expose a column added after it was created, so it's read from
+  // the table and merged in by id. If the column doesn't exist yet
+  // (migration 008 not run) this quietly returns nothing.
+  const fetchCareOfMap = useCallback(async (): Promise<Map<string, string | null>> => {
+    const { data, error } = await supabase.from('quotations').select('id, care_of');
+    const map = new Map<string, string | null>();
+    if (error || !data) return map;
+    data.forEach((r: any) => map.set(r.id, r.care_of ?? null));
+    return map;
   }, []);
+
+  const refreshQuotations = useCallback(async () => {
+    const [{ data }, careOfMap] = await Promise.all([
+      supabase.from('quotations_effective').select('*').order('created_at', { ascending: false }),
+      fetchCareOfMap(),
+    ]);
+    if (data) setQuotations(data.map((row: any) => mapQuotation({ ...row, care_of: careOfMap.get(row.id) ?? row.care_of })));
+  }, [fetchCareOfMap]);
 
   const refreshQuotationPayments = useCallback(async () => {
     const { data } = await supabase.from('quotation_payments').select('*').order('payment_date', { ascending: false });
@@ -610,7 +650,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setInvoices(invoicesRes.data.map((row: any) => mapInvoice(row, itemsByInvoice.get(row.id) ?? [])));
     }
 
-    if (quotationsRes.data) setQuotations(quotationsRes.data.map(mapQuotation));
+    if (quotationsRes.data) {
+      const careOfMap = await fetchCareOfMap();
+      setQuotations(quotationsRes.data.map((row: any) => mapQuotation({ ...row, care_of: careOfMap.get(row.id) ?? row.care_of })));
+    }
     if (quotationPaymentsRes.data) setQuotationPayments(quotationPaymentsRes.data.map(mapQuotationPayment));
     if (expensesRes.data) setExpenses(expensesRes.data.map(mapExpense));
     if (vendorPurchasesRes.data) setVendorPurchases(vendorPurchasesRes.data.map(mapVendorPurchase));
@@ -884,6 +927,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         amount: input.amount,
         expense_date: input.date,
         is_paid: true,
+        // Only sent when filled in, so everything else keeps working even
+        // before the optional database columns (migration 008) exist.
+        ...(input.paidTo?.trim() ? { paid_to: input.paidTo.trim() } : {}),
+        ...(input.category === 'Other' && input.customCategory?.trim() ? { custom_category: input.customCategory.trim() } : {}),
       })
       .select()
       .single();
@@ -1109,6 +1156,102 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return true;
   };
 
+  const updateVendorSlip = async (input: EditVendorSlipInput): Promise<boolean> => {
+    const slip = vendorSlips.find((s) => s.id === input.slipId);
+    if (!slip) return false;
+    const isPriced = slip.status !== 'pending_pricing';
+    const refreshAfter = () => Promise.all([refreshVendorSlips(), refreshVendorPurchases(), refreshVendors(), refreshExpenses()]);
+
+    const { error: headerErr } = await supabase
+      .from('vendor_slips')
+      .update({ care_of: input.careOf, customer_name: input.customerName?.trim() || null })
+      .eq('id', slip.id);
+    if (headerErr) {
+      reportError('Updating slip', headerErr);
+      return false;
+    }
+
+    if (!isPriced) {
+      // Still waiting for prices: replace the item list. New rows go in first,
+      // the old ones are removed after, so a failure never leaves an empty slip.
+      const rows = input.items.map((it, idx) => ({
+        slip_id: slip.id,
+        description: it.description,
+        quantity: it.quantity,
+        unit: it.unit ?? 'pcs',
+        sort_order: idx,
+      }));
+      const { data: inserted, error: insErr } = await supabase.from('vendor_slip_items').insert(rows).select('id');
+      if (insErr || !inserted) {
+        reportError('Saving slip items', insErr);
+        await refreshAfter();
+        return false;
+      }
+      const oldIds = slip.items.map((i) => i.id);
+      if (oldIds.length > 0) {
+        const { error: delErr } = await supabase.from('vendor_slip_items').delete().in('id', oldIds);
+        if (delErr) {
+          await supabase.from('vendor_slip_items').delete().in('id', inserted.map((r: any) => r.id));
+          reportError('Replacing slip items', delErr);
+          await refreshAfter();
+          return false;
+        }
+      }
+      await refreshAfter();
+      return true;
+    }
+
+    // Already priced: quantities and rates feed the purchase amount and the
+    // vendor's payable, so they're only editable while nothing has been paid
+    // against this slip. Text fields are always editable.
+    const purchase = vendorPurchases.find((p) => p.id === slip.expenseId);
+    const moneyLocked = !!purchase && purchase.paidAmount > 0;
+
+    let total = 0;
+    for (const it of input.items) {
+      const orig = it.id ? slip.items.find((x) => x.id === it.id) : undefined;
+      if (!orig) continue;
+      const patch: Record<string, unknown> = { description: it.description };
+      let qty = orig.quantity;
+      let amount = orig.amount ?? 0;
+      if (!moneyLocked) {
+        qty = it.quantity;
+        const rate = it.rate ?? orig.rate ?? 0;
+        amount = Math.round(qty * rate * 100) / 100;
+        patch.quantity = qty;
+        patch.rate = rate;
+        patch.amount = amount;
+      }
+      total += amount;
+      const { error: itemErr } = await supabase.from('vendor_slip_items').update(patch).eq('id', orig.id);
+      if (itemErr) {
+        reportError('Updating slip item', itemErr);
+        await refreshAfter();
+        return false;
+      }
+    }
+
+    if (!moneyLocked && slip.expenseId) {
+      if (total <= 0) {
+        showToast('A priced slip must total more than zero.', 'error');
+        await refreshAfter();
+        return false;
+      }
+      const { error: expErr } = await supabase
+        .from('expenses')
+        .update({ amount: total })
+        .eq('id', slip.expenseId)
+        .not('vendor_id', 'is', null);
+      if (expErr) {
+        reportError('Updating the slip total', expErr);
+        await refreshAfter();
+        return false;
+      }
+    }
+    await refreshAfter();
+    return true;
+  };
+
   // ---------- Purchase bills (GST purchase register) ----------
   // Pure compliance log — a standalone record of a supplier's tax invoice,
   // never touches payable/payments. Deliberately NOT linked to vendors —
@@ -1311,6 +1454,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         gst: totals.gst,
         transportation: input.transportation || 0,
         valid_until: input.validUntil,
+        // Only sent when set, so quotations still save before migration 008 is run.
+        ...(input.careOf ? { care_of: input.careOf } : {}),
       })
       .select()
       .single();
@@ -1331,7 +1476,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // the plain insert() result has no paid_amount/grand_total/
     // effective_status columns, only quotations_effective computes those.
     const { data: effRow } = await supabase.from('quotations_effective').select('*').eq('id', qRow.id).single();
-    const newQuotation = mapQuotation(effRow ?? qRow);
+    const newQuotation = mapQuotation({ ...(effRow ?? qRow), care_of: input.careOf ?? null });
     setQuotations((prev) => [newQuotation, ...prev]);
     return newQuotation;
   };
@@ -1409,6 +1554,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         gst: totals.gst,
         transportation: input.transportation || 0,
         valid_until: input.validUntil,
+        // Sent only when there's a value to set or an old one to clear, so an
+        // edit still saves before migration 008 is run.
+        ...(input.careOf || 'care_of' in oldHeader ? { care_of: input.careOf || null } : {}),
       })
       .eq('id', quotationDbId)
       .select()
@@ -1458,7 +1606,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     const { data: effRow } = await supabase.from('quotations_effective').select('*').eq('id', quotationDbId).single();
-    const updated = mapQuotation(effRow ?? qRow);
+    const updated = mapQuotation({ ...(effRow ?? qRow), care_of: input.careOf ?? null });
     setQuotations((prev) => prev.map((q) => (q.dbId === quotationDbId ? updated : q)));
     return true;
   };
@@ -1827,6 +1975,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       vendorSlips,
       addVendorSlip: guardMobile(addVendorSlip, isMobileView),
       priceVendorSlip: guardMobile(priceVendorSlip, isMobileView),
+      updateVendorSlip: guardMobile(updateVendorSlip, isMobileView),
       purchaseBills,
       addPurchaseBill: guardMobile(addPurchaseBill, isMobileView),
       monthlyFigures,

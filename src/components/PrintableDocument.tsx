@@ -8,6 +8,35 @@ import { PAYMENT_METHOD_LABELS } from '../types';
 import logoLight from '../assets/logo-light.png';
 import { useIsMobile } from '../hooks/useIsMobile';
 
+// "Rupees Eight Thousand Only" — Indian numbering (thousand / lakh / crore).
+const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+function twoDigits(n: number): string {
+  return n < 20 ? ONES[n] : `${TENS[Math.floor(n / 10)]}${n % 10 ? ` ${ONES[n % 10]}` : ''}`;
+}
+function threeDigits(n: number): string {
+  const h = Math.floor(n / 100);
+  const rest = n % 100;
+  return `${h ? `${ONES[h]} Hundred${rest ? ' ' : ''}` : ''}${rest ? twoDigits(rest) : ''}`;
+}
+function amountInWords(value: number): string {
+  const rupees = Math.floor(Math.round(value * 100) / 100);
+  const paise = Math.round((value - rupees) * 100);
+  if (rupees === 0 && paise === 0) return 'Rupees Zero Only';
+  const parts: string[] = [];
+  const crore = Math.floor(rupees / 10000000);
+  const lakh = Math.floor((rupees % 10000000) / 100000);
+  const thousand = Math.floor((rupees % 100000) / 1000);
+  const rest = rupees % 1000;
+  if (crore) parts.push(`${threeDigits(crore)} Crore`);
+  if (lakh) parts.push(`${twoDigits(lakh)} Lakh`);
+  if (thousand) parts.push(`${twoDigits(thousand)} Thousand`);
+  if (rest) parts.push(threeDigits(rest));
+  const rupeeText = rupees > 0 ? `Rupees ${parts.join(' ')}` : '';
+  const paiseText = paise > 0 ? `${rupees > 0 ? ' and ' : 'Rupees '}${twoDigits(paise)} Paise` : '';
+  return `${rupeeText}${paiseText} Only`;
+}
+
 // Business name sits directly under the logo (which already carries the
 // tagline), then the address block. Used by every printed document.
 const LOGO_WIDTH = 120;
@@ -46,6 +75,7 @@ export default function PrintableDocument() {
     customers,
     vendors,
     vendorSlips,
+    purchaseBills,
     convertQuotationToInvoice,
     fetchQuotationItemsForPrint,
   } = useApp();
@@ -93,10 +123,160 @@ export default function PrintableDocument() {
 
   if (!printTarget) return null;
 
+  if (printTarget.kind === 'purchaseBill') {
+    const bill = purchaseBills.find((b) => b.id === printTarget.id);
+    if (!bill) return null;
+    const isIgst = bill.taxType === 'igst';
+    const right = { textAlign: 'right' as const };
+
+    return (
+      <div className="receipt-overlay">
+        <div className="receipt-toolbar no-print">
+          <button className="btn btn-ghost" onClick={() => window.print()}>
+            {printButtonLabel}
+          </button>
+          <button className="btn btn-ghost" onClick={closePrint}>
+            Close
+          </button>
+        </div>
+
+        <div className="receipt-page">
+          <div className="receipt-head">
+            <div>
+              <img src={logoLight} alt="Century Glass Art" style={{ width: LOGO_WIDTH, height: 'auto', marginBottom: 4 }} />
+              {BUSINESS_HEADER}
+            </div>
+            <div className="receipt-meta">
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>PURCHASE BILL</div>
+              <div style={{ fontSize: 10, color: '#888', marginTop: 2 }}>GST purchase register record</div>
+              <div style={{ marginTop: 8 }}>Supplier invoice no: {bill.invoiceNo}</div>
+              <div>Invoice date: {bill.invoiceDate}</div>
+              <div>Place of supply: {bill.placeOfSupply}</div>
+              <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{isIgst ? 'IGST (inter-state)' : 'CGST + SGST (intra-state)'}</div>
+            </div>
+          </div>
+
+          <div className="receipt-two-col" style={{ marginBottom: 14 }}>
+            <div>
+              <div className="receipt-section-label">Supplier</div>
+              <div style={{ fontSize: 12 }}>
+                <div style={{ fontWeight: 700 }}>{bill.supplierName}</div>
+                {bill.supplierAddress && <div style={{ color: '#555' }}>{bill.supplierAddress}</div>}
+                <div style={{ color: '#555' }}>GSTIN: {bill.supplierGstin}</div>
+              </div>
+            </div>
+            <div>
+              <div className="receipt-section-label">Received By</div>
+              <div style={{ fontSize: 12 }}>
+                <div style={{ fontWeight: 700 }}>{BUSINESS.name}</div>
+                <div style={{ color: '#555' }}>{BUSINESS.address}</div>
+                <div style={{ color: '#555' }}>GSTIN: {BUSINESS.gstin}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="receipt-section-label">Items</div>
+          <table className="receipt-table" style={{ fontSize: 10 }}>
+            <thead>
+              <tr>
+                <th style={{ width: 22 }}>#</th>
+                <th>HSN/SAC</th>
+                <th>Description of Goods</th>
+                <th style={right}>Qty</th>
+                <th style={right}>Rate</th>
+                <th style={right}>Taxable</th>
+                <th style={right}>GST %</th>
+                {isIgst ? (
+                  <th style={right}>IGST</th>
+                ) : (
+                  <>
+                    <th style={right}>CGST</th>
+                    <th style={right}>SGST</th>
+                  </>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {bill.items.map((it, idx) => (
+                <tr key={it.id}>
+                  <td>{idx + 1}</td>
+                  <td>{it.hsnCode || '—'}</td>
+                  <td>{it.description}</td>
+                  <td style={right}>{it.quantity}</td>
+                  <td style={right}>{formatINR(it.rate)}</td>
+                  <td style={right}>{formatINR(it.taxableAmount)}</td>
+                  <td style={right}>{it.gstRate}%</td>
+                  {isIgst ? (
+                    <td style={right}>{formatINR(it.igstAmount)}</td>
+                  ) : (
+                    <>
+                      <td style={right}>{formatINR(it.cgstAmount)}</td>
+                      <td style={right}>{formatINR(it.sgstAmount)}</td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="receipt-totals">
+            <div className="receipt-totals-row">
+              <span>Taxable value</span>
+              <span>{formatINR(bill.subtotal)}</span>
+            </div>
+            {isIgst ? (
+              <div className="receipt-totals-row">
+                <span>IGST</span>
+                <span>{formatINR(bill.igstTotal)}</span>
+              </div>
+            ) : (
+              <>
+                <div className="receipt-totals-row">
+                  <span>CGST</span>
+                  <span>{formatINR(bill.cgstTotal)}</span>
+                </div>
+                <div className="receipt-totals-row">
+                  <span>SGST</span>
+                  <span>{formatINR(bill.sgstTotal)}</span>
+                </div>
+              </>
+            )}
+            <div className="receipt-totals-row grand">
+              <span>Total</span>
+              <span>{formatINR(bill.totalAmount)}</span>
+            </div>
+          </div>
+
+          <div style={{ fontSize: 11, color: '#333', marginTop: 4 }}>
+            <span style={{ color: '#888' }}>Amount in words: </span>
+            {amountInWords(bill.totalAmount)}
+          </div>
+
+          <div className="receipt-bottom">
+            <div className="receipt-footer">
+              <div>
+                This is a record of a tax invoice received from the supplier, kept for GST input-tax-credit and filing
+                reference. It does not affect vendor payables.
+              </div>
+              <div className="receipt-signature">
+                <div className="receipt-signature-line">For Century Glass Art</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (printTarget.kind === 'slip') {
     const slip = vendorSlips.find((s) => s.id === printTarget.id);
     if (!slip) return null;
     const vendor = vendors.find((v) => v.id === slip.vendorId);
+    // A priced slip (including a settled one) shows the rates and amounts
+    // that were entered; a slip still waiting for prices prints blank
+    // columns for the vendor to fill in.
+    const slipPriced = slip.status !== 'pending_pricing';
+    const slipTotal = slip.items.reduce((sum, it) => sum + (it.amount ?? 0), 0);
 
     return (
       <div className="receipt-overlay">
@@ -120,6 +300,7 @@ export default function PrintableDocument() {
               <div style={{ marginTop: 6 }}>{slip.dcNo}</div>
               <div>Date: {slip.slipDate}</div>
               <div>Care of: {slip.careOf}</div>
+              {slip.customerName && <div>Customer: {slip.customerName}</div>}
             </div>
           </div>
 
@@ -129,7 +310,7 @@ export default function PrintableDocument() {
             <div style={{ color: '#555' }}>{vendor?.contact}</div>
           </div>
 
-          <div className="receipt-section-label">Items Requested</div>
+          <div className="receipt-section-label">{slipPriced ? 'Items' : 'Items Requested'}</div>
           <table className="receipt-table receipt-table-slip" style={{ fontSize: 11 }}>
             <thead>
               <tr>
@@ -146,15 +327,24 @@ export default function PrintableDocument() {
                   <td>{item.description}</td>
                   <td style={{ textAlign: 'right' }}>{item.quantity}</td>
                   <td style={{ textAlign: 'right' }}>{item.unit}</td>
-                  <td style={{ textAlign: 'right' }}></td>
-                  <td style={{ textAlign: 'right' }}></td>
+                  <td style={{ textAlign: 'right' }}>{slipPriced && item.rate != null ? formatINR(item.rate) : ''}</td>
+                  <td style={{ textAlign: 'right' }}>{slipPriced && item.amount != null ? formatINR(item.amount) : ''}</td>
                 </tr>
               ))}
             </tbody>
           </table>
 
+          {slipPriced && (
+            <div className="receipt-totals">
+              <div className="receipt-totals-row grand">
+                <span>Total</span>
+                <span>{formatINR(slipTotal)}</span>
+              </div>
+            </div>
+          )}
+
           <div className="receipt-footer">
-            <div>Please enter your rates against each item above and return this slip.</div>
+            <div>{slipPriced ? 'Priced slip — rates as entered from the vendor’s bill.' : 'Please enter your rates against each item above and return this slip.'}</div>
             <div className="receipt-signature">
               <div className="receipt-signature-line">For Century Glass Art</div>
             </div>
@@ -224,6 +414,7 @@ export default function PrintableDocument() {
               <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>PAYMENT LEDGER</div>
               <div style={{ marginTop: 6 }}>{quotation.id}</div>
               <div>As of: {todayLocal()}</div>
+              {quotation.careOf && <div>Care of: {quotation.careOf}</div>}
             </div>
           </div>
 
@@ -372,6 +563,9 @@ export default function PrintableDocument() {
             <div style={{ marginTop: 6 }}>{doc.id}</div>
             <div>Date: {doc.date}</div>
             {!isInvoice && quotation && <div>Valid until: {quotation.validUntil}</div>}
+            {(quotation?.careOf ?? invoiceSourceQuotation?.careOf) && (
+              <div>Care of: {quotation?.careOf ?? invoiceSourceQuotation?.careOf}</div>
+            )}
             <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{slab}</div>
           </div>
         </div>

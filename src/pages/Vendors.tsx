@@ -22,7 +22,18 @@ interface HistoryRow {
   category: string | null;
   purchase: VendorPurchase | null;
   pendingSlip: VendorSlip | null;
+  // The slip behind this row, whether still pending or already priced/settled
+  // (null for a quick purchase that never had a slip).
+  slip: VendorSlip | null;
 }
+
+type HistoryFilter = 'all' | 'pending' | 'unpaid' | 'settled';
+const HISTORY_FILTERS: Array<{ key: HistoryFilter; label: string }> = [
+  { key: 'all', label: 'All' },
+  { key: 'pending', label: 'Pending pricing' },
+  { key: 'unpaid', label: 'Unpaid' },
+  { key: 'settled', label: 'Settled' },
+];
 
 export default function Vendors() {
   const {
@@ -40,6 +51,8 @@ export default function Vendors() {
   const [slipModalVendorId, setSlipModalVendorId] = useState<string | null>(null);
   const [paymentVendorId, setPaymentVendorId] = useState<string | null>(null);
   const [pricingSlip, setPricingSlip] = useState<VendorSlip | null>(null);
+  const [editSlip, setEditSlip] = useState<VendorSlip | null>(null);
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all');
   const [search, setSearch] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<Vendor | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -75,6 +88,7 @@ export default function Vendors() {
           category: p.category,
           purchase: p,
           pendingSlip: null,
+          slip: slip ?? null,
         };
       });
 
@@ -93,10 +107,23 @@ export default function Vendors() {
         category: 'Raw Material',
         purchase: null,
         pendingSlip: s,
+        slip: s,
       }));
 
     return [...purchaseRows, ...pendingSlipRows].sort((a, b) => (a.date < b.date ? 1 : -1));
   }, [selectedVendorId, vendorPurchases, vendorSlips, slipByExpenseId]);
+
+  const visibleHistory = useMemo(
+    () =>
+      history.filter((row) => {
+        if (historyFilter === 'all') return true;
+        if (historyFilter === 'pending') return !!row.pendingSlip;
+        if (historyFilter === 'settled') return !!row.purchase && row.purchase.paymentStatus === 'paid';
+        return !!row.purchase && row.purchase.paymentStatus !== 'paid'; // unpaid / partly paid
+      }),
+    [history, historyFilter]
+  );
+  const settledCount = history.filter((r) => r.purchase && r.purchase.paymentStatus === 'paid').length;
 
   // vendor_payments rows only carry an expense_id, not a vendor_id
   // directly — vendorPurchases (already vendor-scoped) gives us the
@@ -212,6 +239,18 @@ export default function Vendors() {
                 </button>
               </div>
             </div>
+            <div className="chip-row" style={{ padding: '12px 20px 4px' }}>
+              {HISTORY_FILTERS.map((f) => (
+                <button
+                  key={f.key}
+                  className={`chip${historyFilter === f.key ? ' is-active' : ''}`}
+                  onClick={() => setHistoryFilter(f.key)}
+                >
+                  {f.label}
+                  {f.key === 'settled' ? ` (${settledCount})` : ''}
+                </button>
+              ))}
+            </div>
             <div className="table-scroll">
               <table className="table-cards">
               <thead>
@@ -226,7 +265,7 @@ export default function Vendors() {
                 </tr>
               </thead>
               <tbody>
-                {history.map((row) => (
+                {visibleHistory.map((row) => (
                   <tr key={row.key}>
                     <td className="card-main">
                       {row.dcNo ? (
@@ -284,29 +323,33 @@ export default function Vendors() {
                     </td>
                     <td className="card-actions">
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      {row.pendingSlip && (
+                      {row.slip && (
                         <>
-                          <button
-                            className="btn btn-ghost btn-small"
-                            onClick={() => openPrint('slip', row.pendingSlip!.id)}
-                          >
-                            Print
+                          <button className="btn btn-ghost btn-small" onClick={() => openPrint('slip', row.slip!.id)}>
+                            {row.pendingSlip ? 'Print' : 'View'}
                           </button>
-                          <button
-                            className="btn btn-primary btn-small desktop-only"
-                            onClick={() => setPricingSlip(row.pendingSlip)}
-                          >
-                            Enter Prices
+                          <button className="btn btn-ghost btn-small desktop-only" onClick={() => setEditSlip(row.slip)}>
+                            Edit
                           </button>
+                          {row.pendingSlip && (
+                            <button
+                              className="btn btn-primary btn-small desktop-only"
+                              onClick={() => setPricingSlip(row.pendingSlip)}
+                            >
+                              Enter Prices
+                            </button>
+                          )}
                         </>
                       )}
                       </div>
                     </td>
                   </tr>
                 ))}
-                {history.length === 0 && (
+                {visibleHistory.length === 0 && (
                   <tr>
-                    <td className="row-sub">No purchases logged yet.</td>
+                    <td className="row-sub">
+                      {history.length === 0 ? 'No purchases logged yet.' : 'Nothing in this view — try another filter above.'}
+                    </td>
                   </tr>
                 )}
               </tbody>
@@ -346,7 +389,14 @@ export default function Vendors() {
           </div>
         </div>
 
-        <VendorSlipModal vendorId={slipModalVendorId} onClose={() => setSlipModalVendorId(null)} />
+        <VendorSlipModal
+          vendorId={editSlip ? editSlip.vendorId : slipModalVendorId}
+          editSlip={editSlip}
+          onClose={() => {
+            setSlipModalVendorId(null);
+            setEditSlip(null);
+          }}
+        />
         <VendorPaymentModal vendor={paymentVendor} onClose={() => setPaymentVendorId(null)} />
         <PriceSlipModal slip={pricingSlip} onClose={() => setPricingSlip(null)} />
         <VendorModal />

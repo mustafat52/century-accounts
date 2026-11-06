@@ -198,7 +198,11 @@ export default function Reports() {
 
   const expenseByCategory = useMemo(() => {
     const map = new Map<string, number>();
-    periodExpenses.forEach((e) => map.set(e.category, (map.get(e.category) ?? 0) + e.amount));
+    // A category the user typed themselves ('Other') is listed under their own name.
+    periodExpenses.forEach((e) => {
+      const label = e.category === 'Other' ? e.customCategory || 'Other' : e.category;
+      map.set(label, (map.get(label) ?? 0) + e.amount);
+    });
     periodVendorPurchases.forEach((v) => map.set(v.category, (map.get(v.category) ?? 0) + v.amount));
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
   }, [periodExpenses, periodVendorPurchases]);

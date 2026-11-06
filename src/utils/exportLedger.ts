@@ -356,6 +356,14 @@ export function exportReportsSnapshot(input: ReportsSnapshotInput) {
   XLSX.writeFile(wb, `Century_Glass_Art_Report_${safePeriod}.xlsx`);
 }
 
+// The category as the person reads it: their own text for 'Other', and plain
+// English for staff advances (stored as 'Payslips & Wages').
+function expenseCategoryText(e: Pick<Expense, 'category' | 'customCategory'>): string {
+  if (e.category === 'Other') return e.customCategory || 'Other';
+  if (e.category === 'Payslips & Wages') return 'Staff advance';
+  return e.category;
+}
+
 // Final report for a "Close Month": general expenses only (payroll rows
 // included — they're ordinary expense rows), exactly the set about to be
 // archived. Throws if the file can't be generated, so the caller can stop
@@ -367,7 +375,10 @@ export function exportExpenseCloseReport(expenses: Expense[], archivedAt?: strin
   const to = rows[0].date;
 
   const totalsByCategory = new Map<string, number>();
-  rows.forEach((r) => totalsByCategory.set(r.category, (totalsByCategory.get(r.category) ?? 0) + r.amount));
+  rows.forEach((r) => {
+    const label = expenseCategoryText(r);
+    totalsByCategory.set(label, (totalsByCategory.get(label) ?? 0) + r.amount);
+  });
   const grandTotal = rows.reduce((sum, r) => sum + r.amount, 0);
 
   const wb = XLSX.utils.book_new();
@@ -386,8 +397,9 @@ export function exportExpenseCloseReport(expenses: Expense[], archivedAt?: strin
 
   const detailData = rows.map((r) => ({
     Date: r.date,
-    Category: r.category,
-    Description: r.description,
+    'What it was for': r.description,
+    'Paid to': r.paidTo ?? '—',
+    Category: expenseCategoryText(r),
     Amount: r.amount,
   }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detailData), 'Expenses');
@@ -395,20 +407,30 @@ export function exportExpenseCloseReport(expenses: Expense[], archivedAt?: strin
   XLSX.writeFile(wb, `Century_Glass_Art_Expenses_${from}_to_${to}.xlsx`);
 }
 
-export function exportAllExpenses(expenses: Expense[], vendorPurchases: VendorPurchase[], vendors: Vendor[]) {
+// One calendar month's expense report ('YYYY-MM'): general expenses plus
+// vendor purchases dated in that month. The grand total is that month ONLY —
+// earlier months are never added in. Throws if the month has no expenses so
+// the caller can say so instead of downloading an empty file.
+export function exportAllExpenses(expenses: Expense[], vendorPurchases: VendorPurchase[], vendors: Vendor[], month: string) {
   const vendorName = (id: string) => vendors.find((v) => v.id === id)?.name ?? 'Unknown vendor';
 
-  type Row = { date: string; category: string; description: string; vendor: string; amount: number };
+  type Row = { date: string; category: string; description: string; paidTo: string; amount: number };
   const rows: Row[] = [
-    ...expenses.map((e) => ({ date: e.date, category: e.category, description: e.description, vendor: '—', amount: e.amount })),
+    ...expenses.map((e) => ({ date: e.date, category: expenseCategoryText(e), description: e.description, paidTo: e.paidTo ?? '', amount: e.amount })),
     ...vendorPurchases.map((p) => ({
       date: p.date,
       category: p.category,
       description: p.description,
-      vendor: vendorName(p.vendorId),
+      paidTo: vendorName(p.vendorId),
       amount: p.amount,
     })),
-  ].sort((a, b) => (a.date < b.date ? 1 : -1));
+  ]
+    .filter((r) => r.date.startsWith(month))
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+
+  if (rows.length === 0) throw new Error('No expenses recorded in this month.');
+
+  const monthName = new Date(`${month}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 
   const totalsByCategory = new Map<string, number>();
   rows.forEach((r) => totalsByCategory.set(r.category, (totalsByCategory.get(r.category) ?? 0) + r.amount));
@@ -417,21 +439,25 @@ export function exportAllExpenses(expenses: Expense[], vendorPurchases: VendorPu
   const wb = XLSX.utils.book_new();
 
   const summaryAoa: (string | number)[][] = [
+    ['Century Glass Art — Expense Report'],
+    ['Month', monthName],
+    ['Number of expenses', rows.length],
+    [],
     ['Category', 'Total'],
     ...Array.from(totalsByCategory.entries()).sort((a, b) => b[1] - a[1]),
     [],
-    ['Grand Total', grandTotal],
+    [`Grand Total (${monthName})`, grandTotal],
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryAoa), 'Summary');
 
   const detailData = rows.map((r) => ({
     Date: r.date,
+    'What it was for': r.description,
+    'Paid to': r.paidTo || '—',
     Category: r.category,
-    Description: r.description,
-    Vendor: r.vendor,
     Amount: r.amount,
   }));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detailData), 'All Expenses');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detailData), 'Expenses');
 
-  XLSX.writeFile(wb, 'Century_Glass_Art_Expense_Report.xlsx');
+  XLSX.writeFile(wb, `Century_Glass_Art_Expenses_${month}.xlsx`);
 }

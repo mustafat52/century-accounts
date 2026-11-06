@@ -115,7 +115,8 @@ export default function Invoicing() {
           if (filter === 'partial') return q.paidAmount > 0 && q.balanceAmount > 0;
           return q.effectiveStatus === filter;
         })
-        .filter((q) => matchesSearch(q.id, q.customerId, q.description))
+        // Also searchable by who's looking after the site (Care of).
+        .filter((q) => matchesSearch(q.id, q.customerId, q.description) || (!!query && !!q.careOf && q.careOf.toLowerCase().includes(query)))
         .sort((a, b) => (a.date < b.date ? 1 : -1)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [quotations, filter, query, customers]
@@ -203,7 +204,10 @@ export default function Invoicing() {
                           <div className="row-sub">Invoiced as {invoiceByDbId.get(q.convertedInvoiceId)!.id}</div>
                         )}
                       </td>
-                      <td className="card-tag-muted">{customerName(q.customerId)}</td>
+                      <td className="card-tag-muted">
+                        {customerName(q.customerId)}
+                        {q.careOf && <div className="row-sub">C/O {q.careOf}</div>}
+                      </td>
                       <td className="num card-amount">
                         {formatINR(q.grandTotal)}
                         {q.discountAmount > 0 && (
@@ -222,40 +226,48 @@ export default function Invoicing() {
                         <StatusBadge status={q.effectiveStatus} showPartial={q.paidAmount > 0 && q.balanceAmount > 0} />
                       </td>
                       <td className="card-actions">
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <button className="btn btn-ghost btn-small" onClick={() => openPrint('quotation', q.id)}>
-                          Quotation
-                        </button>
-                        <button className="btn btn-ghost btn-small" onClick={() => openPrint('ledger', q.id)}>
-                          Ledger
-                        </button>
-                        {q.status === 'pending' && (
-                          <button
-                            className="btn btn-ghost btn-small desktop-only"
-                            onClick={() => openEditQuotationModal(q.dbId)}
-                          >
-                            Edit
+                      {/* Up to seven actions, kept in three tidy rows:
+                          1) view   — Quotation, Ledger, copy-reminder icon
+                          2) change — Edit, Record Payment, Delete
+                          3) Convert to Invoice (the big one) */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'stretch', minWidth: 0 }}>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          <button className="btn btn-ghost btn-small" onClick={() => openPrint('quotation', q.id)}>
+                            Quotation
                           </button>
-                        )}
-                        {q.balanceAmount > 0 && (
-                          <button className="btn btn-ghost btn-small desktop-only" onClick={() => openPaymentModal(q.dbId)}>
-                            Record Payment
+                          <button className="btn btn-ghost btn-small" onClick={() => openPrint('ledger', q.id)}>
+                            Ledger
                           </button>
+                          {(q.effectiveStatus === 'due' || q.effectiveStatus === 'overdue') && (
+                            <CopyReminderButton quotation={q} customerName={customerName(q.customerId)} />
+                          )}
+                        </div>
+                        {(q.status === 'pending' || q.balanceAmount > 0) && (
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            {q.status === 'pending' && (
+                              <button className="btn btn-ghost btn-small desktop-only" onClick={() => openEditQuotationModal(q.dbId)}>
+                                Edit
+                              </button>
+                            )}
+                            {q.balanceAmount > 0 && (
+                              <button className="btn btn-ghost btn-small desktop-only" onClick={() => openPaymentModal(q.dbId)}>
+                                Record Payment
+                              </button>
+                            )}
+                            {q.status === 'pending' && q.paidAmount === 0 && (
+                              <button
+                                className="btn btn-ghost btn-small desktop-only"
+                                style={{ color: 'var(--danger)' }}
+                                onClick={() => setDeleteQuotationTarget(q)}
+                              >
+                                Delete
+                              </button>
+                            )}
+                          </div>
                         )}
                         {q.status === 'pending' && (
-                          <button
-                            className="btn btn-primary btn-small desktop-only"
-                            onClick={() => setConvertTarget(q)}
-                          >
+                          <button className="btn btn-primary btn-small desktop-only" style={{ width: '100%' }} onClick={() => setConvertTarget(q)}>
                             Convert to Invoice
-                          </button>
-                        )}
-                        {(q.effectiveStatus === 'due' || q.effectiveStatus === 'overdue') && (
-                          <CopyReminderButton quotation={q} customerName={customerName(q.customerId)} />
-                        )}
-                        {q.status === 'pending' && q.paidAmount === 0 && (
-                          <button className="btn btn-ghost btn-small desktop-only" onClick={() => setDeleteQuotationTarget(q)}>
-                            Delete
                           </button>
                         )}
                       </div>
@@ -314,6 +326,7 @@ export default function Invoicing() {
                     <td className="card-tag">
                       {i.id}
                       {src && <div className="row-sub">From {src.id}</div>}
+                      {src?.careOf && <div className="row-sub">C/O {src.careOf}</div>}
                     </td>
                     <td className="card-tag-muted">{customerName(i.customerId)}</td>
                     <td className="num card-amount">

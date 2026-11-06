@@ -126,13 +126,19 @@ export type ExpenseCategory =
   | 'Transport'
   | 'Rent'
   | 'Utilities'
-  | 'Maintenance';
+  | 'Maintenance'
+  // A category the user typed themselves — the text is in Expense.customCategory.
+  | 'Other';
 
 export interface Expense {
   id: string;
   category: ExpenseCategory;
   vendorId?: string;
   description: string;
+  // Who the money was paid to (optional, free text).
+  paidTo?: string;
+  // The user's own category name when category === 'Other'.
+  customCategory?: string;
   amount: number;
   date: string;
   // Set when the expense was swept out of the Expenses page by "Close
@@ -283,6 +289,8 @@ export interface Quotation {
   validUntil: string;
   status: QuotationStatus;
   convertedInvoiceId: string | null;
+  // Who in the business is looking after this site / project (optional).
+  careOf: string | null;
   // ---- Live payment tracking (from quotations_effective) ----
   grandTotal: number; // amount - discountAmount + gst + transportation
   paidAmount: number; // sum of quotation_payments

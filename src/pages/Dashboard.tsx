@@ -17,7 +17,12 @@ export default function Dashboard() {
   const { invoices, quotations, customers, vendors, monthlyFigures, dashboardSummary } = useApp();
 
   const stats = useMemo(() => {
-    const outstandingReceivable = customers.reduce((sum, c) => sum + c.outstanding, 0);
+    // Only bills that have been converted to an invoice count here — a
+    // quotation that hasn't been invoiced yet is not money owed. For each
+    // invoiced bill that's the part still unpaid (a fully paid one adds 0).
+    const outstandingReceivable = quotations
+      .filter((q) => q.status === 'converted')
+      .reduce((sum, q) => sum + q.balanceAmount, 0);
     const outstandingPayable = vendors.reduce((sum, v) => sum + v.payable, 0);
     const overdueCount = quotations.filter((q) => q.effectiveStatus === 'overdue').length;
     const thisMonth = monthlyFigures[monthlyFigures.length - 1];
@@ -32,7 +37,7 @@ export default function Dashboard() {
     }
 
     return { outstandingReceivable, outstandingPayable, overdueCount, thisMonth, revenueDelta };
-  }, [quotations, customers, vendors, monthlyFigures]);
+  }, [quotations, vendors, monthlyFigures]);
 
   const recent = [...invoices].slice(0, 5);
   const overdueQuotations = quotations.filter((q) => q.effectiveStatus === 'overdue');

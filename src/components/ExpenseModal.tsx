@@ -11,20 +11,25 @@ const CATEGORIES: ExpenseCategory[] = [
   'Rent',
   'Utilities',
   'Maintenance',
+  'Other',
 ];
 
 export default function ExpenseModal() {
   const { isExpenseModalOpen, closeExpenseModal, addExpense } = useApp();
 
   const [category, setCategory] = useState<ExpenseCategory>('Rent');
+  const [customCategory, setCustomCategory] = useState('');
   const [description, setDescription] = useState('');
+  const [paidTo, setPaidTo] = useState('');
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState('');
 
   useEffect(() => {
     if (isExpenseModalOpen) {
       setCategory('Rent');
+      setCustomCategory('');
       setDescription('');
+      setPaidTo('');
       setAmount('');
       setDate(todayLocal());
     }
@@ -36,7 +41,15 @@ export default function ExpenseModal() {
 
   const handleSave = async () => {
     if (!description || amountNum <= 0 || !date) return;
-    const ok = await addExpense({ category, description, amount: amountNum, date });
+    if (category === 'Other' && !customCategory.trim()) return;
+    const ok = await addExpense({
+      category,
+      customCategory: category === 'Other' ? customCategory.trim() : undefined,
+      paidTo: paidTo.trim() || undefined,
+      description,
+      amount: amountNum,
+      date,
+    });
     if (ok) closeExpenseModal();
   };
 
@@ -60,7 +73,7 @@ export default function ExpenseModal() {
                     neither is offered as a manual category. */}
                 {CATEGORIES.filter((c) => c !== 'Raw Material' && c !== 'Payslips & Wages').map((c) => (
                   <option key={c} value={c}>
-                    {c}
+                    {c === 'Other' ? 'Other (write your own)' : c}
                   </option>
                 ))}
               </select>
@@ -71,6 +84,21 @@ export default function ExpenseModal() {
             </div>
           </div>
 
+          {category === 'Other' && (
+            <div className="form-row">
+              <div className="form-field">
+                <label>Your category name</label>
+                <input
+                  type="text"
+                  value={customCategory}
+                  onChange={(e) => setCustomCategory(capitalizeFirst(e.target.value))}
+                  placeholder="e.g. Packaging, Tea & snacks, Insurance"
+                  autoFocus
+                />
+              </div>
+            </div>
+          )}
+
           <div className="form-row">
             <div className="form-field">
               <label>Description</label>
@@ -79,6 +107,18 @@ export default function ExpenseModal() {
                 value={description}
                 onChange={(e) => setDescription(capitalizeFirst(e.target.value))}
                 placeholder="e.g. Monthly workshop rent"
+              />
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="form-field">
+              <label>Paid to (optional)</label>
+              <input
+                type="text"
+                value={paidTo}
+                onChange={(e) => setPaidTo(capitalizeFirst(e.target.value))}
+                placeholder="e.g. Mohammed Bhai, Landlord, Courier"
               />
             </div>
           </div>
@@ -95,7 +135,11 @@ export default function ExpenseModal() {
           <button className="btn btn-ghost" onClick={closeExpenseModal}>
             Cancel
           </button>
-          <button className="btn btn-primary" onClick={handleSave}>
+          <button
+            className="btn btn-primary"
+            onClick={handleSave}
+            disabled={category === 'Other' && !customCategory.trim()}
+          >
             Save expense
           </button>
         </div>
