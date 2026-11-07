@@ -23,6 +23,35 @@ const STATUS_FILTERS: Array<{ key: QuotationFilter; label: string }> = [
   { key: 'paid', label: 'Paid' },
 ];
 
+// A small square emoji button. The name shows on hover (and is read out by
+// screen readers); phones have no hover, so the emojis are chosen to be obvious.
+function EmojiButton({
+  icon,
+  label,
+  onClick,
+  desktopOnly,
+  danger,
+}: {
+  icon: string;
+  label: string;
+  onClick: () => void;
+  desktopOnly?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className={`btn btn-ghost btn-small${desktopOnly ? ' desktop-only' : ''}`}
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+      style={{ fontSize: 16, lineHeight: 1, padding: '7px 0', ...(danger ? { borderColor: 'var(--danger)' } : {}) }}
+    >
+      {icon}
+    </button>
+  );
+}
+
 type InvoiceFilter = 'all' | 'outstanding';
 
 const INVOICE_FILTERS: Array<{ key: InvoiceFilter; label: string }> = [
@@ -226,47 +255,41 @@ export default function Invoicing() {
                         <StatusBadge status={q.effectiveStatus} showPartial={q.paidAmount > 0 && q.balanceAmount > 0} />
                       </td>
                       <td className="card-actions">
-                      {/* Up to seven actions, kept in three tidy rows:
-                          1) view   — Quotation, Ledger, copy-reminder icon
-                          2) change — Edit, Record Payment, Delete
-                          3) Convert to Invoice (the big one) */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'stretch', minWidth: 0 }}>
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                          <button className="btn btn-ghost btn-small" onClick={() => openPrint('quotation', q.id)}>
-                            Quotation
-                          </button>
-                          <button className="btn btn-ghost btn-small" onClick={() => openPrint('ledger', q.id)}>
-                            Ledger
-                          </button>
-                          {(q.effectiveStatus === 'due' || q.effectiveStatus === 'overdue') && (
-                            <CopyReminderButton quotation={q} customerName={customerName(q.customerId)} />
-                          )}
-                        </div>
-                        {(q.status === 'pending' || q.balanceAmount > 0) && (
-                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                            {q.status === 'pending' && (
-                              <button className="btn btn-ghost btn-small desktop-only" onClick={() => openEditQuotationModal(q.dbId)}>
-                                Edit
-                              </button>
-                            )}
-                            {q.balanceAmount > 0 && (
-                              <button className="btn btn-ghost btn-small desktop-only" onClick={() => openPaymentModal(q.dbId)}>
-                                Record Payment
-                              </button>
-                            )}
-                            {q.status === 'pending' && q.paidAmount === 0 && (
-                              <button
-                                className="btn btn-ghost btn-small desktop-only"
-                                style={{ color: 'var(--danger)' }}
-                                onClick={() => setDeleteQuotationTarget(q)}
-                              >
-                                Delete
-                              </button>
-                            )}
-                          </div>
+                      {/* Seven possible actions in three rows (emoji buttons; hover for the name):
+                          1) 📄 Quotation   📒 Ledger     ✏️ Edit
+                          2) 🔔 Reminder    💰 Payment    🗑️ Delete
+                          3) Convert to Invoice (unchanged) */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 44px)', gap: 6, width: 'fit-content' }}>
+                        <EmojiButton icon="📄" label="Quotation" onClick={() => openPrint('quotation', q.id)} />
+                        <EmojiButton icon="📒" label="Ledger" onClick={() => openPrint('ledger', q.id)} />
+                        {q.status === 'pending' ? (
+                          <EmojiButton icon="✏️" label="Edit" desktopOnly onClick={() => openEditQuotationModal(q.dbId)} />
+                        ) : (
+                          <span />
                         )}
+
+                        {(q.effectiveStatus === 'due' || q.effectiveStatus === 'overdue') ? (
+                          <CopyReminderButton quotation={q} customerName={customerName(q.customerId)} />
+                        ) : (
+                          <span />
+                        )}
+                        {q.balanceAmount > 0 ? (
+                          <EmojiButton icon="💰" label="Record Payment" desktopOnly onClick={() => openPaymentModal(q.dbId)} />
+                        ) : (
+                          <span />
+                        )}
+                        {q.status === 'pending' && q.paidAmount === 0 ? (
+                          <EmojiButton icon="🗑️" label="Delete" desktopOnly danger onClick={() => setDeleteQuotationTarget(q)} />
+                        ) : (
+                          <span />
+                        )}
+
                         {q.status === 'pending' && (
-                          <button className="btn btn-primary btn-small desktop-only" style={{ width: '100%' }} onClick={() => setConvertTarget(q)}>
+                          <button
+                            className="btn btn-primary btn-small desktop-only"
+                            style={{ gridColumn: '1 / -1' }}
+                            onClick={() => setConvertTarget(q)}
+                          >
                             Convert to Invoice
                           </button>
                         )}
