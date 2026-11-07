@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { Fragment, useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import type { NewQuotationItemInput } from '../context/AppContext';
 import type { InvoiceSlab } from '../types';
@@ -149,6 +149,23 @@ function draftsToPayload(drafts: DraftItem[]): NewQuotationItemInput[] {
 const effectiveDiscount = (slab: InvoiceSlab, custom: string) => (slab === 'A' ? parseFloat(custom) || 0 : SLAB_DISCOUNT_PERCENT[slab]);
 
 // Used to skip the write entirely when Edit is saved with nothing changed.
+// One row of the "same product, more sizes" panel.
+interface SizeRow {
+  key: string;
+  length: string;
+  width: string;
+  qty: string;
+}
+let sizeKeyCounter = 0;
+function blankSize(): SizeRow {
+  sizeKeyCounter += 1;
+  return { key: `size-${sizeKeyCounter}`, length: '', width: '', qty: '1' };
+}
+const isSizeValid = (r: SizeRow) => (parseFloat(r.length) || 0) > 0 && (parseFloat(r.width) || 0) > 0 && (parseFloat(r.qty) || 0) > 0;
+
+// Marks the "someone else — type a name" choice in the Care of dropdown.
+const CARE_OF_OTHER = '__other__';
+
 // Who in the business can be put in charge of a site / project (same people
 // as the vendor slips use).
 const CARE_OF_CHOICES = ['Shabbir Bhai', 'Abdul Hussain Bhai', 'Taqi Bhai'];
@@ -190,6 +207,11 @@ export default function QuotationModal() {
   const [customDiscount, setCustomDiscount] = useState('0');
   const [transportation, setTransportation] = useState('');
   const [careOf, setCareOf] = useState('');
+  // True while "Someone else…" is chosen, so the name can be typed by hand.
+  const [careOfCustom, setCareOfCustom] = useState(false);
+  // "Same product, more sizes": which glass item's panel is open, and its rows.
+  const [bulkKey, setBulkKey] = useState<string | null>(null);
+  const [bulkRows, setBulkRows] = useState<SizeRow[]>([blankSize()]);
   const [items, setItems] = useState<DraftItem[]>([blankItem('glass')]);
   // Which item-type table is currently shown while editing. Purely a
   // display filter — the saved quotation always combines items of both
@@ -217,6 +239,7 @@ export default function QuotationModal() {
         setTransportation(editingQuotation.transportation > 0 ? String(editingQuotation.transportation) : '');
         setGstOn(editingQuotation.gst > 0);
         setCareOf(editingQuotation.careOf ?? '');
+        setCareOfCustom(!!editingQuotation.careOf && !CARE_OF_CHOICES.includes(editingQuotation.careOf));
         setLoadingItems(true);
         initialSnapshotRef.current = null;
         // Reload the quotation's real saved items into the form — without
@@ -247,6 +270,7 @@ export default function QuotationModal() {
         setCustomDiscount('0');
         setTransportation('');
         setCareOf('');
+        setCareOfCustom(false);
         setGstOn(gstEnabled);
         setLoadingItems(false);
         initialSnapshotRef.current = null;
@@ -256,6 +280,11 @@ export default function QuotationModal() {
     }
     wasOpenRef.current = isQuotationModalOpen;
   }, [isQuotationModalOpen, quotationModalCustomerId, editingQuotation, customers, fetchQuotationItems]);
+
+  useEffect(() => {
+    setBulkKey(null);
+    setBulkRows([blankSize()]);
+  }, [isQuotationModalOpen]);
 
   // Auto-add: the moment the last row OF A GIVEN TYPE becomes fully valid,
   // silently append a fresh blank row of that same type. Tracked
@@ -285,6 +314,63 @@ export default function QuotationModal() {
 
   const updateItem = (key: string, patch: Partial<DraftItem>) => {
     setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)));
+  };
+
+  // ---- Same product, several sizes ------------------------------------
+  // Enter the product once, then list its sizes. Each size becomes an
+  // ordinary glass item carrying the shared description / rates / options,
+  // exactly as if it had been typed on its own — so the totals maths and the
+  // printed quotation are unchanged (one line per size).
+  const openBulk = (key: string) => {
+    setBulkKey((cur) => (cur === key ? null : key));
+    setBulkRows([blankSize()]);
+  };
+
+  const updateBulkRow = (rowKey: string, patch: Partial<SizeRow>) => {
+    setBulkRows((prev) => {
+      const next = prev.map((r) => (r.key === rowKey ? { ...r, ...patch } : r));
+      // Same auto-add as the item rows: filling the last row opens a new one.
+      return isSizeValid(next[next.length - 1]) ? [...next, blankSize()] : next;
+    });
+  };
+
+  const removeBulkRow = (rowKey: string) => {
+    setBulkRows((prev) => (prev.length > 1 ? prev.filter((r) => r.key !== rowKey) : prev));
+  };
+
+  const applyBulkSizes = (originKey: string) => {
+    const sizes = bulkRows.filter(isSizeValid);
+    if (sizes.length === 0) return;
+    setItems((prev) => {
+      const at = prev.findIndex((it) => it.key === originKey);
+      if (at < 0) return prev;
+      const origin = prev[at];
+      const make = (s: SizeRow): DraftItem => ({
+        ...blankItem('glass'),
+        description: origin.description,
+        area: origin.area,
+        thicknessMm: origin.thicknessMm,
+        ratePerSft: origin.ratePerSft,
+        polishRate: origin.polishRate,
+        fixingRatePerSft: origin.fixingRatePerSft,
+        labourOnly: origin.labourOnly,
+        lengthIn: s.length,
+        widthIn: s.width,
+        glassQty: s.qty,
+      });
+      const next = [...prev];
+      let toInsert = sizes;
+      // If the item has no size yet, its own card takes the first size so no empty card is left behind.
+      if (!(parseFloat(origin.lengthIn) || 0) && !(parseFloat(origin.widthIn) || 0)) {
+        next[at] = { ...origin, lengthIn: sizes[0].length, widthIn: sizes[0].width, glassQty: sizes[0].qty };
+        toInsert = sizes.slice(1);
+      }
+      next.splice(at + 1, 0, ...toInsert.map(make));
+      return next;
+    });
+    setBulkKey(null);
+    setBulkRows([blankSize()]);
+    showToast(`${sizes.length} size${sizes.length !== 1 ? 's' : ''} added.`, 'success');
   };
 
   const CUSTOM_DESCRIPTION = '__custom__';
@@ -439,16 +525,36 @@ export default function QuotationModal() {
             </div>
             <div className="form-field">
               <label>Care of (who's looking after this site)</label>
-              <select value={careOf} onChange={(e) => setCareOf(e.target.value)}>
+              <select
+                value={careOfCustom ? CARE_OF_OTHER : careOf}
+                onChange={(e) => {
+                  if (e.target.value === CARE_OF_OTHER) {
+                    setCareOfCustom(true);
+                    setCareOf('');
+                  } else {
+                    setCareOfCustom(false);
+                    setCareOf(e.target.value);
+                  }
+                }}
+              >
                 <option value="">— Not assigned —</option>
                 {CARE_OF_CHOICES.map((c) => (
                   <option key={c} value={c}>
                     {c}
                   </option>
                 ))}
-                {/* Keeps an older value visible if it's no longer in the list. */}
-                {careOf && !CARE_OF_CHOICES.includes(careOf) && <option value={careOf}>{careOf}</option>}
+                <option value={CARE_OF_OTHER}>Someone else (type a name)…</option>
               </select>
+              {careOfCustom && (
+                <input
+                  type="text"
+                  style={{ marginTop: 8 }}
+                  value={careOf}
+                  onChange={(e) => setCareOf(capitalizeFirst(e.target.value))}
+                  placeholder="Type the name"
+                  autoFocus
+                />
+              )}
             </div>
           </div>
 
@@ -643,6 +749,74 @@ export default function QuotationModal() {
                       <label>Rate (₹)</label>
                       <input type="number" value={item.rate} onChange={(e) => updateItem(item.key, { rate: e.target.value })} />
                     </div>
+                  </div>
+                )}
+
+                {isGlass && (
+                  <div style={{ marginTop: 10 }}>
+                    <button className="btn btn-ghost btn-small" type="button" onClick={() => openBulk(item.key)}>
+                      {bulkKey === item.key ? 'Close multiple sizes' : '+ Same product, more sizes'}
+                    </button>
+                    {bulkKey === item.key && (
+                      <div style={{ marginTop: 10, padding: 12, border: '1px solid var(--border)', borderRadius: 8 }}>
+                        <div className="row-sub" style={{ marginBottom: 10 }}>
+                          Fill in the description and rates above once, then list every size here. Each size is added as its own line using
+                          those details, and the quotation prints one line per size.
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 90px 28px', gap: 8, alignItems: 'center' }}>
+                          <span className="row-sub">Length (in)</span>
+                          <span className="row-sub">Width (in)</span>
+                          <span className="row-sub">Qty</span>
+                          <span />
+                          {bulkRows.map((r) => (
+                            <Fragment key={r.key}>
+                              <input type="number" value={r.length} onChange={(e) => updateBulkRow(r.key, { length: e.target.value })} />
+                              <input type="number" value={r.width} onChange={(e) => updateBulkRow(r.key, { width: e.target.value })} />
+                              <input type="number" value={r.qty} onChange={(e) => updateBulkRow(r.key, { qty: e.target.value })} />
+                              <button
+                                className="item-table-remove"
+                                type="button"
+                                tabIndex={-1}
+                                onClick={() => removeBulkRow(r.key)}
+                                title="Remove this size"
+                              >
+                                ×
+                              </button>
+                            </Fragment>
+                          ))}
+                        </div>
+                        {(() => {
+                          const sharedOk =
+                            !!item.description.trim() &&
+                            (item.labourOnly
+                              ? (parseFloat(item.polishRate) || 0) > 0 || (parseFloat(item.fixingRatePerSft) || 0) > 0
+                              : (parseFloat(item.ratePerSft) || 0) > 0);
+                          const count = bulkRows.filter(isSizeValid).length;
+                          return (
+                            <>
+                              {!sharedOk && (
+                                <div className="field-warn" style={{ marginTop: 8 }}>
+                                  Add this item's description and rate above first — every size uses them.
+                                </div>
+                              )}
+                              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
+                                <button className="btn btn-ghost btn-small" type="button" onClick={() => setBulkKey(null)}>
+                                  Cancel
+                                </button>
+                                <button
+                                  className="btn btn-primary btn-small"
+                                  type="button"
+                                  disabled={count === 0 || !sharedOk}
+                                  onClick={() => applyBulkSizes(item.key)}
+                                >
+                                  {count > 0 ? `Add ${count} size${count !== 1 ? 's' : ''}` : 'Add sizes'}
+                                </button>
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
                   </div>
                 )}
 
